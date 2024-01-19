@@ -100,6 +100,7 @@
 //! Recompiling a project with cache enabled detects all files that meet these criteria and provides
 //! solc with only these dirty files instead of the entire source set.
 
+use crate::utils;
 use crate::{
     artifact_output::Artifacts,
     artifacts::{Settings, VersionedFilteredSources, VersionedSources},

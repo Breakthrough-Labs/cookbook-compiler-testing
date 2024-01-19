@@ -1,7 +1,7 @@
 //! Bindings for standard json output selection.
 
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, fs::Metadata, str::FromStr};
 
 /// Represents the desired outputs based on a File `(file -> (contract -> [outputs]))`
 pub type FileOutputSelection = BTreeMap<String, Vec<String>>;
@@ -196,6 +196,7 @@ impl ContractOutputSelection {
     pub fn basic() -> Vec<ContractOutputSelection> {
         vec![
             ContractOutputSelection::Abi,
+            ContractOutputSelection::Metadata,
             BytecodeOutputSelection::All.into(),
             DeployedBytecodeOutputSelection::All.into(),
             EvmOutputSelection::MethodIdentifiers.into(),
