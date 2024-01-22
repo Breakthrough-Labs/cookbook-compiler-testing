@@ -218,7 +218,6 @@ impl<'a, T: ArtifactOutput> ProjectCompiler<'a, T> {
 
         // drive the compiler statemachine to completion
         let mut output = self.preprocess()?.compile()?.write_artifacts()?.write_cache()?;
-        let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
 
         if slash_paths {
             // ensures we always use `/` paths
@@ -559,6 +558,7 @@ fn compile_sequential(
             let input_name: &str = "input.json";
             let output_name: &str = "output.json";
             let _hi = utils::write_json_file(&input, &input_name, 64 * 1024);
+            let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
 
             report::solc_success(&solc, &version, &output, &start.elapsed());
             trace!("compiled input, output has error: {}", output.has_error());
