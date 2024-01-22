@@ -66,17 +66,17 @@ fn can_compile_hardhat_sample() {
 
 #[test]
 fn can_compile_dapp_sample() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/dapp-sample");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/solmate");
     let paths = ProjectPathsConfig::builder().sources(root.join("src")).lib(root.join("lib"));
     let project = TempProject::<ConfigurableArtifacts>::new(paths).unwrap();
 
     let compiled = project.compile().unwrap();
-    assert!(compiled.find_first("Dapp").is_some());
+    assert!(compiled.find_first("ERC20").is_some());
     compiled.assert_success();
 
     // nothing to compile
     let compiled = project.compile().unwrap();
-    assert!(compiled.find_first("Dapp").is_some());
+    assert!(compiled.find_first("ERC20").is_some());
     assert!(compiled.is_unchanged());
 
     let cache = SolFilesCache::read(project.cache_path()).unwrap();
@@ -84,7 +84,7 @@ fn can_compile_dapp_sample() {
     // delete artifacts
     std::fs::remove_dir_all(&project.paths().artifacts).unwrap();
     let compiled = project.compile().unwrap();
-    assert!(compiled.find_first("Dapp").is_some());
+    assert!(compiled.find_first("ERC20").is_some());
     assert!(!compiled.is_unchanged());
 
     let updated_cache = SolFilesCache::read(project.cache_path()).unwrap();
@@ -1743,6 +1743,13 @@ fn can_create_standard_json_input_with_symlink() {
         .filter_map(|e| if e.severity.is_error() { Some(e.message) } else { None })
         .collect::<Vec<_>>();
     assert!(compiler_errors.is_empty(), "{:?}", compiler_errors);
+}
+
+#[test]
+fn can_compile_real_project() {
+    let paths = ProjectPathsConfig::builder().root("test-data/solmate").build().unwrap();
+    let project = Project::builder().paths(paths).build().unwrap();
+    let _out = project.compile().unwrap();
 }
 
 #[test]
