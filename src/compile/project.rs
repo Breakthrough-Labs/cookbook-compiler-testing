@@ -559,7 +559,6 @@ fn compile_sequential(
             let output_name: &str = "output.json";
             let _hi = utils::write_json_file(&input, &input_name, 64 * 1024);
             let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
-
             report::solc_success(&solc, &version, &output, &start.elapsed());
             trace!("compiled input, output has error: {}", output.has_error());
             trace!("received compiler output: {:?}", output.contracts.keys());
