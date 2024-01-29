@@ -104,7 +104,18 @@ impl OutputSelection {
     ///
     /// Which enables it for all the contracts in the file ("*" wildcard)
     pub fn default_file_output_selection() -> FileOutputSelection {
-        BTreeMap::from([("*".to_string(), vec!["*".to_string()])])
+        BTreeMap::from([(
+            "*".to_string(),
+            vec![
+                "abi".to_string(),
+                "evm.bytecode".to_string(),
+                "evm.deployedBytecode".to_string(),
+                "evm.methodIdentifiers".to_string(),
+                "devdoc".to_string(),
+                "userdoc".to_string(),
+                "metadata".to_string(),
+            ],
+        )])
     }
 
     /// Returns an empty output selection which corresponds to an empty map `{}`
