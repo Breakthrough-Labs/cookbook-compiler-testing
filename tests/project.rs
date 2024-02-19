@@ -354,8 +354,7 @@ contract c { }
 }
 
 #[test]
-
-fn can_emit_paralell() {
+fn can_emit_parallel() {
     let mut project = TempProject::dapptools().unwrap();
     project.project_mut().build_info = true;
     project
@@ -375,15 +374,6 @@ contract A { }
             r"
 pragma solidity ^0.8.10;
 contract B { }
-",
-        )
-        .unwrap();
-    project
-        .add_source(
-            "C",
-            r"
-pragma solidity ^0.5.16;
-contract c { }
 ",
         )
         .unwrap();

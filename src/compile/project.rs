@@ -557,10 +557,12 @@ fn compile_sequential(
             let start = Instant::now();
             report::solc_spawn(&solc, &version, &input, &actually_dirty);
             let output = solc.compile(&input)?;
-            let input_name: &str = "input.json";
-            let output_name: &str = "output.json";
-            let _hi = utils::write_json_file(&input, &input_name, 64 * 1024);
-            let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
+            let input_json = to_string_pretty(&input).expect("Failed to serialize input");
+            let output_json = to_string_pretty(&output).expect("Failed to serialize output");
+            fs::write(format!("{}_input.json", version), input_json)
+                .expect("Failed to write input JSON");
+            fs::write(format!("{}_output.json", version), output_json)
+                .expect("Failed to write output JSON");
             report::solc_success(&solc, &version, &output, &start.elapsed());
             trace!("compiled input, output has error: {}", output.has_error());
             trace!("received compiler output: {:?}", output.contracts.keys());
