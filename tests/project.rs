@@ -329,6 +329,15 @@ contract B { }
 ",
         )
         .unwrap();
+    project
+        .add_source(
+            "C",
+            r"
+pragma solidity ^0.5.16;
+contract c { }
+",
+        )
+        .unwrap();
 
     let compiled = project.compile().unwrap();
     compiled.assert_success();
@@ -342,6 +351,45 @@ contract B { }
         build_info_count += 1;
     }
     assert_eq!(build_info_count, 1);
+}
+
+#[test]
+
+fn can_emit_paralell() {
+    let mut project = TempProject::dapptools().unwrap();
+    project.project_mut().build_info = true;
+    project
+        .add_source(
+            "A",
+            r#"
+pragma solidity ^0.8.10;
+import "./B.sol";
+contract A { }
+"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "B",
+            r"
+pragma solidity ^0.8.10;
+contract B { }
+",
+        )
+        .unwrap();
+    project
+        .add_source(
+            "C",
+            r"
+pragma solidity ^0.5.16;
+contract c { }
+",
+        )
+        .unwrap();
+
+    let compiled = project.compile().unwrap();
+    compiled.assert_success();
 }
 
 #[test]

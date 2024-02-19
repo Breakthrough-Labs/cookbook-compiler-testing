@@ -1,0 +1,66 @@
+{
+  "sources": {
+    "src/C.sol": {
+      "id": 0,
+      "ast": {
+        "absolutePath": "src/C.sol",
+        "id": 3,
+        "exportedSymbols": {
+          "c": [
+            2
+          ]
+        },
+        "nodeType": "SourceUnit",
+        "src": "1:40:0",
+        "nodes": [
+          {
+            "id": 1,
+            "nodeType": "PragmaDirective",
+            "src": "1:24:0",
+            "nodes": [],
+            "literals": [
+              "solidity",
+              "^",
+              "0.5",
+              ".16"
+            ]
+          },
+          {
+            "id": 2,
+            "nodeType": "ContractDefinition",
+            "src": "26:14:0",
+            "nodes": [],
+            "baseContracts": [],
+            "contractDependencies": [],
+            "contractKind": "contract",
+            "documentation": null,
+            "fullyImplemented": true,
+            "linearizedBaseContracts": [
+              2
+            ],
+            "name": "c",
+            "scope": 3
+          }
+        ]
+      }
+    }
+  },
+  "contracts": {
+    "src/C.sol": {
+      "c": {
+        "abi": [],
+        "metadata": "{\"compiler\":{\"version\":\"0.5.17+commit.d19bba13\"},\"language\":\"Solidity\",\"output\":{\"abi\":[],\"devdoc\":{\"methods\":{}},\"userdoc\":{\"methods\":{}}},\"settings\":{\"compilationTarget\":{\"src/C.sol\":\"c\"},\"evmVersion\":\"istanbul\",\"libraries\":{},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"src/C.sol\":{\"keccak256\":\"0x4660b869f9338a64fa73f238e062fda38ce20327f04bc4aea8cea4cb5146bbee\",\"urls\":[\"bzz-raw://376842ef88e6663bd04e4c444b11b04d75d361f8c22bc53cbd4dc183caaffb14\",\"dweb:/ipfs/QmeiqSUdRF47iyLq2anaWUfcGiZtjF97ByJw5xT7XStvZD\"]}},\"version\":1}",
+        "userdoc": {},
+        "devdoc": {},
+        "evm": {
+          "bytecode": {
+            "object": "6080604052348015600f57600080fd5b50603e80601d6000396000f3fe6080604052600080fdfea265627a7a72315820d3af1ff8ccdd6bb1f9874554ff0e9ab900326fe30c4f35c75aad7382943bb6d964736f6c63430005110032",
+            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xF JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x3E DUP1 PUSH1 0x1D PUSH1 0x0 CODECOPY PUSH1 0x0 RETURN INVALID PUSH1 0x80 PUSH1 0x40 MSTORE PUSH1 0x0 DUP1 REVERT INVALID LOG2 PUSH6 0x627A7A723158 KECCAK256 0xD3 0xAF 0x1F 0xF8 0xCC 0xDD PUSH12 0xB1F9874554FF0E9AB900326F 0xE3 0xC 0x4F CALLDATALOAD 0xC7 GAS 0xAD PUSH20 0x82943BB6D964736F6C6343000511003200000000 ",
+            "sourceMap": "26:14:0:-;;;;8:9:-1;5:2;;;30:1;27;20:12;5:2;26:14:0;;;;;;;",
+            "linkReferences": {}
+          }
+        }
+      }
+    }
+  }
+}

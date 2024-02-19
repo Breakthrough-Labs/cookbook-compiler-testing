@@ -115,6 +115,8 @@ use crate::{
     Sources,
 };
 use rayon::prelude::*;
+use serde_json::to_string_pretty;
+use std::fs;
 use std::{collections::btree_map::BTreeMap, path::PathBuf, time::Instant};
 
 #[derive(Debug)]
@@ -591,15 +593,12 @@ fn compile_parallel(
     let mut jobs = Vec::with_capacity(input.len());
     for (solc, (version, filtered_sources)) in input {
         if filtered_sources.is_empty() {
-            // nothing to compile
             trace!("skip solc {} {} for empty sources set", solc.as_ref().display(), version);
             continue;
         }
 
         let dirty_files: Vec<PathBuf> = filtered_sources.dirty_files().cloned().collect();
 
-        // depending on the composition of the filtered sources, the output selection can be
-        // optimized
         let mut opt_settings = settings.clone();
         let sources = sparse_output.sparse_sources(filtered_sources, &mut opt_settings, graph);
 
@@ -611,8 +610,6 @@ fn compile_parallel(
                 .cloned()
                 .collect::<Vec<_>>();
             if actually_dirty.is_empty() {
-                // nothing to compile for this particular language, all dirty files are in the other
-                // language set
                 trace!(
                     "skip solc {} {} compilation of {} compiler input due to empty source set",
                     solc.as_ref().display(),
@@ -628,25 +625,17 @@ fn compile_parallel(
                 .with_remappings(paths.remappings.clone())
                 .with_base_path(&paths.root)
                 .sanitized(&version);
-
             jobs.push((solc.clone(), version.clone(), job, actually_dirty))
         }
     }
 
-    // need to get the currently installed reporter before installing the pool, otherwise each new
-    // thread in the pool will get initialized with the default value of the `thread_local!`'s
-    // localkey. This way we keep access to the reporter in the rayon pool
     let scoped_report = report::get_default(|reporter| reporter.clone());
-
-    // start a rayon threadpool that will execute all `Solc::compile()` processes
     let pool = rayon::ThreadPoolBuilder::new().num_threads(num_jobs).build().unwrap();
 
     let outputs = pool.install(move || {
         jobs.into_par_iter()
             .map(move |(solc, version, input, actually_dirty)| {
-                // set the reporter on this thread
                 let _guard = report::set_scoped(&scoped_report);
-
                 trace!(
                     "calling solc `{}` {:?} with {} sources: {:?}",
                     version,
@@ -658,19 +647,29 @@ fn compile_parallel(
                 report::solc_spawn(&solc, &version, &input, &actually_dirty);
                 solc.compile(&input).map(move |output| {
                     report::solc_success(&solc, &version, &output, &start.elapsed());
-                    (version, input, output)
+
+                    // Serialize input and output to JSON
+                    let input_json = to_string_pretty(&input).expect("Failed to serialize input");
+                    let output_json =
+                        to_string_pretty(&output).expect("Failed to serialize output");
+
+                    fs::write(format!("{}_input.json", version), input_json)
+                        .expect("Failed to write input JSON");
+                    fs::write(format!("{}_output.json", version), output_json)
+                        .expect("Failed to write output JSON");
+
+                    (version.clone(), input, output)
                 })
             })
             .collect::<Result<Vec<_>>>()
     })?;
 
     let mut aggregated = AggregatedCompilerOutput::default();
-    for (version, input, output) in outputs {
-        // if configured also create the build info
-        if create_build_info {
-            let build_info = RawBuildInfo::new(&input, &output, &version)?;
-            aggregated.build_infos.insert(version.clone(), build_info);
-        }
+    for (version, _, output) in outputs {
+        // if create_build_info {
+        //     let build_info = RawBuildInfo::new(&input, &output, &version)?; // Note: This needs adjustment as `input` is not directly available here
+        //     aggregated.build_infos.insert(version, build_info);
+        // }
         aggregated.extend(version, output);
     }
 

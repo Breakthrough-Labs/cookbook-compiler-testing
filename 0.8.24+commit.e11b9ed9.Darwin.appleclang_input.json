@@ -1,0 +1,33 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "src/A.sol": {
+      "content": "\npragma solidity ^0.8.10;\nimport \"./B.sol\";\ncontract A { }\n"
+    },
+    "src/B.sol": {
+      "content": "\npragma solidity ^0.8.10;\ncontract B { }\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "outputSelection": {
+      "*": {
+        "": [
+          "ast"
+        ],
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "devdoc",
+          "userdoc",
+          "metadata"
+        ]
+      }
+    },
+    "evmVersion": "shanghai",
+    "libraries": {}
+  }
+}
