@@ -354,6 +354,7 @@ contract c { }
 }
 
 #[test]
+
 fn can_emit_parallel() {
     let mut project = TempProject::dapptools().unwrap();
     project.project_mut().build_info = true;
