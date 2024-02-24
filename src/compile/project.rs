@@ -649,13 +649,10 @@ fn compile_parallel(
                     report::solc_success(&solc, &version, &output, &start.elapsed());
 
                     // Serialize input and output to JSON
-                    let input_json = to_string_pretty(&input).expect("Failed to serialize input");
-                    let output_json = to_string_pretty(&output).expect("Failed to serialize output");
-
-                    fs::write(format!("{}_input.json", version), input_json)
-                        .expect("Failed to write input JSON");
-                    fs::write(format!("{}_output.json", version), output_json)
-                        .expect("Failed to write output JSON");
+                    let input_name = format!("{}_input.json", version);
+                    let output_name = format!("{}_output.json", version);
+                    let _hi = utils::write_json_file(&input, &input_name, 64 * 1024);
+                    let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
 
                     (version.clone(), input, output)
                 })
