@@ -1,11 +1,14 @@
 {
   "language": "Solidity",
   "sources": {
-    "src/A.sol": {
-      "content": "\npragma solidity ^0.8.10;\nimport \"./B.sol\";\ncontract A { }\n"
+    "greater-equal-0.5.0.sol": {
+      "content": "pragma solidity >=0.5.0;\n\ncontract C {\n    function foo() public {}\n}\n"
     },
-    "src/B.sol": {
-      "content": "\npragma solidity ^0.8.10;\ncontract B { }\n"
+    "pinned-0.4.14.sol": {
+      "content": "// pragma solidity =0.4.14;\n\n// contract D {\n//     function foo() public {}\n// }\n"
+    },
+    "simple-0.4.14.sol": {
+      "content": "// pragma solidity =0.4.14;\n\n// contract F {\n//     function foo() public {}\n// }\n"
     }
   },
   "settings": {

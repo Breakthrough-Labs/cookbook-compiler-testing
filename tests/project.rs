@@ -221,6 +221,7 @@ fn can_compile_dapp_detect_changes_in_libs() {
 }
 
 #[test]
+
 fn can_compile_dapp_detect_changes_in_sources() {
     let project = TempProject::<ConfigurableArtifacts>::dapptools().unwrap();
 
@@ -306,6 +307,7 @@ fn can_compile_dapp_detect_changes_in_sources() {
 }
 
 #[test]
+
 fn can_emit_build_info() {
     let mut project = TempProject::dapptools().unwrap();
     project.project_mut().build_info = true;

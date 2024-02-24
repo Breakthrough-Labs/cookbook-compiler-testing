@@ -2,7 +2,7 @@
   "errors": [
     {
       "sourceLocation": {
-        "file": "src/A.sol",
+        "file": "greater-equal-0.5.0.sol",
         "start": -1,
         "end": -1
       },
@@ -11,11 +11,11 @@
       "severity": "warning",
       "errorCode": "1878",
       "message": "SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.",
-      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> src/A.sol\n\n"
+      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> greater-equal-0.5.0.sol\n\n"
     },
     {
       "sourceLocation": {
-        "file": "src/B.sol",
+        "file": "pinned-0.4.14.sol",
         "start": -1,
         "end": -1
       },
@@ -24,150 +24,169 @@
       "severity": "warning",
       "errorCode": "1878",
       "message": "SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.",
-      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> src/B.sol\n\n"
+      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> pinned-0.4.14.sol\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "simple-0.4.14.sol",
+        "start": -1,
+        "end": -1
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": "1878",
+      "message": "SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.",
+      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> simple-0.4.14.sol\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "pinned-0.4.14.sol",
+        "start": -1,
+        "end": -1
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": "3420",
+      "message": "Source file does not specify required compiler version! Consider adding \"pragma solidity ^0.8.24;\"",
+      "formattedMessage": "Warning: Source file does not specify required compiler version! Consider adding \"pragma solidity ^0.8.24;\"\n--> pinned-0.4.14.sol\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "simple-0.4.14.sol",
+        "start": -1,
+        "end": -1
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": "3420",
+      "message": "Source file does not specify required compiler version! Consider adding \"pragma solidity ^0.8.24;\"",
+      "formattedMessage": "Warning: Source file does not specify required compiler version! Consider adding \"pragma solidity ^0.8.24;\"\n--> simple-0.4.14.sol\n\n"
     }
   ],
   "sources": {
-    "src/A.sol": {
+    "greater-equal-0.5.0.sol": {
       "id": 0,
       "ast": {
-        "absolutePath": "src/A.sol",
-        "id": 4,
+        "absolutePath": "greater-equal-0.5.0.sol",
+        "id": 7,
         "exportedSymbols": {
-          "A": [
-            3
-          ],
-          "B": [
+          "C": [
             6
           ]
         },
         "nodeType": "SourceUnit",
-        "src": "1:58:0",
+        "src": "0:70:0",
         "nodes": [
           {
             "id": 1,
             "nodeType": "PragmaDirective",
-            "src": "1:24:0",
+            "src": "0:24:0",
             "nodes": [],
             "literals": [
               "solidity",
-              "^",
-              "0.8",
-              ".10"
-            ]
-          },
-          {
-            "id": 2,
-            "nodeType": "ImportDirective",
-            "src": "26:17:0",
-            "nodes": [],
-            "absolutePath": "src/B.sol",
-            "file": "./B.sol",
-            "nameLocation": "-1:-1:-1",
-            "scope": 4,
-            "sourceUnit": 7,
-            "symbolAliases": [],
-            "unitAlias": ""
-          },
-          {
-            "id": 3,
-            "nodeType": "ContractDefinition",
-            "src": "44:14:0",
-            "nodes": [],
-            "abstract": false,
-            "baseContracts": [],
-            "canonicalName": "A",
-            "contractDependencies": [],
-            "contractKind": "contract",
-            "fullyImplemented": true,
-            "linearizedBaseContracts": [
-              3
-            ],
-            "name": "A",
-            "nameLocation": "53:1:0",
-            "scope": 4,
-            "usedErrors": [],
-            "usedEvents": []
-          }
-        ]
-      }
-    },
-    "src/B.sol": {
-      "id": 1,
-      "ast": {
-        "absolutePath": "src/B.sol",
-        "id": 7,
-        "exportedSymbols": {
-          "B": [
-            6
-          ]
-        },
-        "nodeType": "SourceUnit",
-        "src": "1:40:1",
-        "nodes": [
-          {
-            "id": 5,
-            "nodeType": "PragmaDirective",
-            "src": "1:24:1",
-            "nodes": [],
-            "literals": [
-              "solidity",
-              "^",
-              "0.8",
-              ".10"
+              ">=",
+              "0.5",
+              ".0"
             ]
           },
           {
             "id": 6,
             "nodeType": "ContractDefinition",
-            "src": "26:14:1",
-            "nodes": [],
+            "src": "26:43:0",
+            "nodes": [
+              {
+                "id": 5,
+                "nodeType": "FunctionDefinition",
+                "src": "43:24:0",
+                "nodes": [],
+                "body": {
+                  "id": 4,
+                  "nodeType": "Block",
+                  "src": "65:2:0",
+                  "nodes": [],
+                  "statements": []
+                },
+                "functionSelector": "c2985578",
+                "implemented": true,
+                "kind": "function",
+                "modifiers": [],
+                "name": "foo",
+                "nameLocation": "52:3:0",
+                "parameters": {
+                  "id": 2,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "55:2:0"
+                },
+                "returnParameters": {
+                  "id": 3,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "65:0:0"
+                },
+                "scope": 6,
+                "stateMutability": "nonpayable",
+                "virtual": false,
+                "visibility": "public"
+              }
+            ],
             "abstract": false,
             "baseContracts": [],
-            "canonicalName": "B",
+            "canonicalName": "C",
             "contractDependencies": [],
             "contractKind": "contract",
             "fullyImplemented": true,
             "linearizedBaseContracts": [
               6
             ],
-            "name": "B",
-            "nameLocation": "35:1:1",
+            "name": "C",
+            "nameLocation": "35:1:0",
             "scope": 7,
             "usedErrors": [],
             "usedEvents": []
           }
         ]
       }
+    },
+    "pinned-0.4.14.sol": {
+      "id": 1,
+      "ast": {
+        "absolutePath": "pinned-0.4.14.sol",
+        "id": 8,
+        "exportedSymbols": {},
+        "nodeType": "SourceUnit",
+        "src": "82:0:1",
+        "nodes": []
+      }
+    },
+    "simple-0.4.14.sol": {
+      "id": 2,
+      "ast": {
+        "absolutePath": "simple-0.4.14.sol",
+        "id": 9,
+        "exportedSymbols": {},
+        "nodeType": "SourceUnit",
+        "src": "82:0:2",
+        "nodes": []
+      }
     }
   },
   "contracts": {
-    "src/A.sol": {
-      "A": {
-        "abi": [],
-        "metadata": "{\"compiler\":{\"version\":\"0.8.24+commit.e11b9ed9\"},\"language\":\"Solidity\",\"output\":{\"abi\":[],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/A.sol\":\"A\"},\"evmVersion\":\"shanghai\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"src/A.sol\":{\"keccak256\":\"0x438324ed0ab4911127832e09da41fdd41f643c26b312030ffdc1afb77b79a3b0\",\"urls\":[\"bzz-raw://3e67302dfcb5cb1e243f96e0cbb55e384630a436d8b352929246cbea195b3c93\",\"dweb:/ipfs/QmTfgdeoQrt25bPsWUb5k2wqLK9SUPyu8tAh9YqmHxBgDg\"]},\"src/B.sol\":{\"keccak256\":\"0x3c0e77a5692f118677655ae99c07a9fc9aa5a224b7bb57797d99bfe7b2e50c8b\",\"urls\":[\"bzz-raw://7ca14b6286f75b00d5ce97f15474a6385b9f5aebb6658fda46f8655552eeb0f5\",\"dweb:/ipfs/QmcWJ2aD3p8Up3bKNkeWTJRkH7pXRwxcdwgwvD4cWUgQvx\"]}},\"version\":1}",
-        "userdoc": {
-          "version": 1,
-          "kind": "user"
-        },
-        "devdoc": {
-          "version": 1,
-          "kind": "dev"
-        },
-        "evm": {
-          "bytecode": {
-            "object": "6080604052348015600e575f80fd5b50603e80601a5f395ff3fe60806040525f80fdfea2646970667358221220a8e65ba48f4f486e60114f94c13d3f36eddabb5f3e23d9bda9ae61975eea6d0964736f6c63430008180033",
-            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xE JUMPI PUSH0 DUP1 REVERT JUMPDEST POP PUSH1 0x3E DUP1 PUSH1 0x1A PUSH0 CODECOPY PUSH0 RETURN INVALID PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 DUP1 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 0xA8 0xE6 JUMPDEST LOG4 DUP16 0x4F BASEFEE PUSH15 0x60114F94C13D3F36EDDABB5F3E23D9 0xBD 0xA9 0xAE PUSH2 0x975E 0xEA PUSH14 0x964736F6C634300081800330000 ",
-            "sourceMap": "44:14:0:-:0;;;;;;;;;;;;;;;;;;;",
-            "linkReferences": {}
+    "greater-equal-0.5.0.sol": {
+      "C": {
+        "abi": [
+          {
+            "type": "function",
+            "name": "foo",
+            "inputs": [],
+            "outputs": [],
+            "stateMutability": "nonpayable"
           }
-        }
-      }
-    },
-    "src/B.sol": {
-      "B": {
-        "abi": [],
-        "metadata": "{\"compiler\":{\"version\":\"0.8.24+commit.e11b9ed9\"},\"language\":\"Solidity\",\"output\":{\"abi\":[],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/B.sol\":\"B\"},\"evmVersion\":\"shanghai\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"src/B.sol\":{\"keccak256\":\"0x3c0e77a5692f118677655ae99c07a9fc9aa5a224b7bb57797d99bfe7b2e50c8b\",\"urls\":[\"bzz-raw://7ca14b6286f75b00d5ce97f15474a6385b9f5aebb6658fda46f8655552eeb0f5\",\"dweb:/ipfs/QmcWJ2aD3p8Up3bKNkeWTJRkH7pXRwxcdwgwvD4cWUgQvx\"]}},\"version\":1}",
+        ],
+        "metadata": "{\"compiler\":{\"version\":\"0.8.24+commit.e11b9ed9\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[],\"name\":\"foo\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"greater-equal-0.5.0.sol\":\"C\"},\"evmVersion\":\"shanghai\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"greater-equal-0.5.0.sol\":{\"keccak256\":\"0x3ef7129561edfa7431f7be7a2ed06053b726b7f993d5b60d1dcd5b5534b0ea52\",\"urls\":[\"bzz-raw://af1bb0ba6944cfe26a348fb578906eebb02c5fc3f4d2ae2f6d1531f86b680885\",\"dweb:/ipfs/QmRwqTuUGpGX9DLMNyeURdj3ShMsFX5jaBvYDYiiYkW5S6\"]}},\"version\":1}",
         "userdoc": {
           "version": 1,
           "kind": "user"
@@ -178,9 +197,9 @@
         },
         "evm": {
           "bytecode": {
-            "object": "6080604052348015600e575f80fd5b50603e80601a5f395ff3fe60806040525f80fdfea2646970667358221220781937f9d3977bda28fd51914be85b63b3a560714c4627d673e956c78db96a0764736f6c63430008180033",
-            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xE JUMPI PUSH0 DUP1 REVERT JUMPDEST POP PUSH1 0x3E DUP1 PUSH1 0x1A PUSH0 CODECOPY PUSH0 RETURN INVALID PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 DUP1 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 PUSH25 0x1937F9D3977BDA28FD51914BE85B63B3A560714C4627D673E9 JUMP 0xC7 DUP14 0xB9 PUSH11 0x764736F6C634300081800 CALLER ",
-            "sourceMap": "26:14:1:-:0;;;;;;;;;;;;;;;;;;;",
+            "object": "6080604052348015600e575f80fd5b50606a80601a5f395ff3fe6080604052348015600e575f80fd5b50600436106026575f3560e01c8063c298557814602a575b5f80fd5b60306032565b005b56fea264697066735822122066bb6a86e4708afff2d97c68dc447e10054c99b49b4fee4c8654671b25a665cf64736f6c63430008180033",
+            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xE JUMPI PUSH0 DUP1 REVERT JUMPDEST POP PUSH1 0x6A DUP1 PUSH1 0x1A PUSH0 CODECOPY PUSH0 RETURN INVALID PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xE JUMPI PUSH0 DUP1 REVERT JUMPDEST POP PUSH1 0x4 CALLDATASIZE LT PUSH1 0x26 JUMPI PUSH0 CALLDATALOAD PUSH1 0xE0 SHR DUP1 PUSH4 0xC2985578 EQ PUSH1 0x2A JUMPI JUMPDEST PUSH0 DUP1 REVERT JUMPDEST PUSH1 0x30 PUSH1 0x32 JUMP JUMPDEST STOP JUMPDEST JUMP INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 PUSH7 0xBB6A86E4708AFF CALLCODE 0xD9 PUSH29 0x68DC447E10054C99B49B4FEE4C8654671B25A665CF64736F6C63430008 XOR STOP CALLER ",
+            "sourceMap": "26:43:0:-:0;;;;;;;;;;;;;;;;;;;",
             "linkReferences": {}
           }
         }

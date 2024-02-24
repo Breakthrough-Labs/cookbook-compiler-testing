@@ -1,0 +1,33 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "caret-0.4.14.sol": {
+      "content": "pragma solidity ^0.4.14;\n\ncontract B {\n    function foo() public {}\n}\n"
+    },
+    "range-0.5.0.sol": {
+      "content": "pragma solidity >=0.4.0 <0.5.0;\n\ncontract E {\n    function foo() public {}\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "outputSelection": {
+      "*": {
+        "": [
+          "ast"
+        ],
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "devdoc",
+          "userdoc",
+          "metadata"
+        ]
+      }
+    },
+    "evmVersion": "constantinople",
+    "libraries": {}
+  }
+}

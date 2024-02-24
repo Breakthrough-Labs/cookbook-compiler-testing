@@ -1,0 +1,247 @@
+{
+  "errors": [
+    {
+      "sourceLocation": {
+        "file": "caret-0.4.14.sol",
+        "start": 43,
+        "end": 67
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": null,
+      "message": "Function state mutability can be restricted to pure",
+      "formattedMessage": "caret-0.4.14.sol:4:5: Warning: Function state mutability can be restricted to pure\n    function foo() public {}\n    ^----------------------^\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "range-0.5.0.sol",
+        "start": 50,
+        "end": 74
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": null,
+      "message": "Function state mutability can be restricted to pure",
+      "formattedMessage": "range-0.5.0.sol:4:5: Warning: Function state mutability can be restricted to pure\n    function foo() public {}\n    ^----------------------^\n"
+    }
+  ],
+  "sources": {
+    "caret-0.4.14.sol": {
+      "id": 0,
+      "ast": {
+        "absolutePath": "caret-0.4.14.sol",
+        "id": 7,
+        "exportedSymbols": {
+          "B": [
+            6
+          ]
+        },
+        "nodeType": "SourceUnit",
+        "src": "0:70:0",
+        "nodes": [
+          {
+            "id": 1,
+            "nodeType": "PragmaDirective",
+            "src": "0:24:0",
+            "nodes": [],
+            "literals": [
+              "solidity",
+              "^",
+              "0.4",
+              ".14"
+            ]
+          },
+          {
+            "id": 6,
+            "nodeType": "ContractDefinition",
+            "src": "26:43:0",
+            "nodes": [
+              {
+                "id": 5,
+                "nodeType": "FunctionDefinition",
+                "src": "43:24:0",
+                "nodes": [],
+                "body": {
+                  "id": 4,
+                  "nodeType": "Block",
+                  "src": "65:2:0",
+                  "nodes": [],
+                  "statements": []
+                },
+                "documentation": null,
+                "implemented": true,
+                "isConstructor": false,
+                "isDeclaredConst": false,
+                "modifiers": [],
+                "name": "foo",
+                "parameters": {
+                  "id": 2,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "55:2:0"
+                },
+                "payable": false,
+                "returnParameters": {
+                  "id": 3,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "65:0:0"
+                },
+                "scope": 6,
+                "stateMutability": "nonpayable",
+                "superFunction": null,
+                "visibility": "public"
+              }
+            ],
+            "baseContracts": [],
+            "contractDependencies": [],
+            "contractKind": "contract",
+            "documentation": null,
+            "fullyImplemented": true,
+            "linearizedBaseContracts": [
+              6
+            ],
+            "name": "B",
+            "scope": 7
+          }
+        ]
+      }
+    },
+    "range-0.5.0.sol": {
+      "id": 1,
+      "ast": {
+        "absolutePath": "range-0.5.0.sol",
+        "id": 14,
+        "exportedSymbols": {
+          "E": [
+            13
+          ]
+        },
+        "nodeType": "SourceUnit",
+        "src": "0:77:1",
+        "nodes": [
+          {
+            "id": 8,
+            "nodeType": "PragmaDirective",
+            "src": "0:31:1",
+            "nodes": [],
+            "literals": [
+              "solidity",
+              ">=",
+              "0.4",
+              ".0",
+              "<",
+              "0.5",
+              ".0"
+            ]
+          },
+          {
+            "id": 13,
+            "nodeType": "ContractDefinition",
+            "src": "33:43:1",
+            "nodes": [
+              {
+                "id": 12,
+                "nodeType": "FunctionDefinition",
+                "src": "50:24:1",
+                "nodes": [],
+                "body": {
+                  "id": 11,
+                  "nodeType": "Block",
+                  "src": "72:2:1",
+                  "nodes": [],
+                  "statements": []
+                },
+                "documentation": null,
+                "implemented": true,
+                "isConstructor": false,
+                "isDeclaredConst": false,
+                "modifiers": [],
+                "name": "foo",
+                "parameters": {
+                  "id": 9,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "62:2:1"
+                },
+                "payable": false,
+                "returnParameters": {
+                  "id": 10,
+                  "nodeType": "ParameterList",
+                  "parameters": [],
+                  "src": "72:0:1"
+                },
+                "scope": 13,
+                "stateMutability": "nonpayable",
+                "superFunction": null,
+                "visibility": "public"
+              }
+            ],
+            "baseContracts": [],
+            "contractDependencies": [],
+            "contractKind": "contract",
+            "documentation": null,
+            "fullyImplemented": true,
+            "linearizedBaseContracts": [
+              13
+            ],
+            "name": "E",
+            "scope": 14
+          }
+        ]
+      }
+    }
+  },
+  "contracts": {
+    "caret-0.4.14.sol": {
+      "B": {
+        "abi": [
+          {
+            "type": "function",
+            "name": "foo",
+            "inputs": [],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+          }
+        ],
+        "metadata": "{\"compiler\":{\"version\":\"0.4.26+commit.4563c3fc\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"constant\":false,\"inputs\":[],\"name\":\"foo\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"methods\":{}},\"userdoc\":{\"methods\":{}}},\"settings\":{\"compilationTarget\":{\"caret-0.4.14.sol\":\"B\"},\"evmVersion\":\"constantinople\",\"libraries\":{},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"caret-0.4.14.sol\":{\"keccak256\":\"0x20af9572e618d7b7af2452775796761b5c985cd66b3150835499c47c290fb5fd\",\"urls\":[\"bzzr://b75054c076b1b47140c97e6731cf82fc6d05969724ea38e2b1b59409f66a5ec4\"]}},\"version\":1}",
+        "userdoc": {},
+        "devdoc": {},
+        "evm": {
+          "bytecode": {
+            "object": "6080604052348015600f57600080fd5b50606980601d6000396000f30060806040526004361060225760003560e01c63ffffffff168063c2985578146027575b600080fd5b348015603257600080fd5b506039603b565b005b5600a165627a7a72305820050ee527c48ccbf2c9e601e48a7dbed288022391e9843ad7d0b045a9bfaaf6cc0029",
+            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xF JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x69 DUP1 PUSH1 0x1D PUSH1 0x0 CODECOPY PUSH1 0x0 RETURN STOP PUSH1 0x80 PUSH1 0x40 MSTORE PUSH1 0x4 CALLDATASIZE LT PUSH1 0x22 JUMPI PUSH1 0x0 CALLDATALOAD PUSH1 0xE0 SHR PUSH4 0xFFFFFFFF AND DUP1 PUSH4 0xC2985578 EQ PUSH1 0x27 JUMPI JUMPDEST PUSH1 0x0 DUP1 REVERT JUMPDEST CALLVALUE DUP1 ISZERO PUSH1 0x32 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x39 PUSH1 0x3B JUMP JUMPDEST STOP JUMPDEST JUMP STOP LOG1 PUSH6 0x627A7A723058 KECCAK256 SDIV 0xe 0xe5 0x27 0xc4 DUP13 0xcb CALLCODE 0xc9 0xe6 ADD 0xe4 DUP11 PUSH30 0xBED288022391E9843AD7D0B045A9BFAAF6CC002900000000000000000000 ",
+            "sourceMap": "26:43:0:-;;;;8:9:-1;5:2;;;30:1;27;20:12;5:2;26:43:0;;;;;;;",
+            "linkReferences": {}
+          }
+        }
+      }
+    },
+    "range-0.5.0.sol": {
+      "E": {
+        "abi": [
+          {
+            "type": "function",
+            "name": "foo",
+            "inputs": [],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+          }
+        ],
+        "metadata": "{\"compiler\":{\"version\":\"0.4.26+commit.4563c3fc\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"constant\":false,\"inputs\":[],\"name\":\"foo\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"methods\":{}},\"userdoc\":{\"methods\":{}}},\"settings\":{\"compilationTarget\":{\"range-0.5.0.sol\":\"E\"},\"evmVersion\":\"constantinople\",\"libraries\":{},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"range-0.5.0.sol\":{\"keccak256\":\"0x999ab00a4eb297790436135be967c479ce00bab7f58625f4a5189d13f99feac4\",\"urls\":[\"bzzr://babc758ea1ca4390a8b43ddc22f8c8d7a492a895bbca73eafd0888008758371c\"]}},\"version\":1}",
+        "userdoc": {},
+        "devdoc": {},
+        "evm": {
+          "bytecode": {
+            "object": "6080604052348015600f57600080fd5b50606980601d6000396000f30060806040526004361060225760003560e01c63ffffffff168063c2985578146027575b600080fd5b348015603257600080fd5b506039603b565b005b5600a165627a7a72305820db91a2337992e7197d11cb2957498a03604403be00c48d3e2d32ebb5aa1e62910029",
+            "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xF JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x69 DUP1 PUSH1 0x1D PUSH1 0x0 CODECOPY PUSH1 0x0 RETURN STOP PUSH1 0x80 PUSH1 0x40 MSTORE PUSH1 0x4 CALLDATASIZE LT PUSH1 0x22 JUMPI PUSH1 0x0 CALLDATALOAD PUSH1 0xE0 SHR PUSH4 0xFFFFFFFF AND DUP1 PUSH4 0xC2985578 EQ PUSH1 0x27 JUMPI JUMPDEST PUSH1 0x0 DUP1 REVERT JUMPDEST CALLVALUE DUP1 ISZERO PUSH1 0x32 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x39 PUSH1 0x3B JUMP JUMPDEST STOP JUMPDEST JUMP STOP LOG1 PUSH6 0x627A7A723058 KECCAK256 0xdb SWAP2 LOG2 CALLER PUSH26 0x92E7197D11CB2957498A03604403BE00C48D3E2D32EBB5AA1E62 SWAP2 STOP 0x29 ",
+            "sourceMap": "33:43:1:-;;;;8:9:-1;5:2;;;30:1;27;20:12;5:2;33:43:1;;;;;;;",
+            "linkReferences": {}
+          }
+        }
+      }
+    }
+  }
+}
