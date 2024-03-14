@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
-#![deny(rustdoc::broken_intra_doc_links)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(rustdoc::all)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[macro_use]
 extern crate tracing;
@@ -9,19 +11,23 @@ extern crate tracing;
 pub mod error;
 
 pub mod artifacts;
+pub use artifacts::{CompilerInput, CompilerOutput, EvmVersion};
+
 pub mod sourcemap;
 
-pub use artifacts::{CompilerInput, CompilerOutput, EvmVersion};
-use std::collections::{BTreeMap, HashSet};
-
 mod artifact_output;
-pub mod buildinfo;
-pub mod cache;
-pub mod hh;
 pub use artifact_output::*;
 
-pub mod resolver;
+pub mod buildinfo;
+
+pub mod cache;
+
+pub mod flatten;
+
+pub mod hh;
 pub use hh::{HardhatArtifact, HardhatArtifacts};
+
+pub mod resolver;
 pub use resolver::Graph;
 
 mod compile;
@@ -34,15 +40,16 @@ mod config;
 pub use config::{AllowedLibPaths, PathStyle, ProjectPaths, ProjectPathsConfig, SolcConfig};
 
 pub mod remappings;
-use crate::artifacts::{Source, SourceFile, StandardJsonCompilerInput};
 
 mod filter;
-pub mod report;
-pub mod utils;
 pub use filter::{FileFilter, TestFileFilter};
 
+pub mod report;
+
+pub mod utils;
+
 use crate::{
-    artifacts::Sources,
+    artifacts::{Source, SourceFile, Sources, StandardJsonCompilerInput},
     cache::SolFilesCache,
     config::IncludePaths,
     error::{SolcError, SolcIoError},
@@ -52,7 +59,10 @@ use artifacts::{contract::Contract, Severity};
 use compile::output::contracts::VersionedContracts;
 use error::Result;
 use semver::Version;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
+};
 
 /// Utilities for creating, mocking and testing of (temporary) projects
 #[cfg(feature = "project-util")]
@@ -79,6 +89,8 @@ pub struct Project<T: ArtifactOutput = ConfigurableArtifacts> {
     pub artifacts: T,
     /// Errors/Warnings which match these error codes are not going to be logged
     pub ignored_error_codes: Vec<u64>,
+    /// Errors/Warnings which match these file paths are not going to be logged
+    pub ignored_file_paths: Vec<PathBuf>,
     /// The minimum severity level that is treated as a compiler error
     pub compiler_severity_filter: Severity,
     /// The paths which will be allowed for library inclusion
@@ -96,29 +108,35 @@ pub struct Project<T: ArtifactOutput = ConfigurableArtifacts> {
 }
 
 impl Project {
-    /// Convenience function to call `ProjectBuilder::default()`
+    /// Convenience function to call `ProjectBuilder::default()`.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// Configure with `ConfigurableArtifacts` artifacts output
+    /// Configure with `ConfigurableArtifacts` artifacts output:
     ///
-    /// ```rust
+    /// ```
     /// use foundry_compilers::Project;
-    /// let config = Project::builder().build().unwrap();
+    ///
+    /// let config = Project::builder().build()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// To configure any a project with any `ArtifactOutput` use either
+    /// To configure any a project with any `ArtifactOutput` use either:
     ///
-    /// ```rust
+    /// ```
     /// use foundry_compilers::Project;
-    /// let config = Project::builder().build().unwrap();
+    ///
+    /// let config = Project::builder().build()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// or use the builder directly
+    /// or use the builder directly:
     ///
-    /// ```rust
+    /// ```
     /// use foundry_compilers::{ConfigurableArtifacts, ProjectBuilder};
-    /// let config = ProjectBuilder::<ConfigurableArtifacts>::default().build().unwrap();
+    ///
+    /// let config = ProjectBuilder::<ConfigurableArtifacts>::default().build()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn builder() -> ProjectBuilder {
         ProjectBuilder::default()
@@ -226,25 +244,27 @@ impl<T: ArtifactOutput> Project<T> {
         self.paths.read_sources()
     }
 
-    /// This emits the cargo [`rerun-if-changed`](https://doc.rust-lang.org/cargo/reference/build-scripts.html#cargorerun-if-changedpath) instruction.
-    /// Which tells Cargo to re-run the build script if a file inside the project's sources
-    /// directory has changed.
+    /// Emit the cargo [`rerun-if-changed`](https://doc.rust-lang.org/cargo/reference/build-scripts.html#cargorerun-if-changedpath) instruction.
+    ///
+    /// This tells Cargo to re-run the build script if a file inside the project's sources directory
+    /// has changed.
     ///
     /// Use this if you compile a project in a `build.rs` file.
     ///
-    /// # Example `build.rs` file
-    ///
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{Project, ProjectPathsConfig};
-    /// // configure the project with all its paths, solc, cache etc. where the root dir is the current rust project.
-    /// let project = Project::builder()
-    ///     .paths(ProjectPathsConfig::hardhat(env!("CARGO_MANIFEST_DIR")).unwrap())
-    ///     .build()
-    ///     .unwrap();
-    /// let output = project.compile().unwrap();
-    /// // Tell Cargo that if a source file changes, to rerun this build script.
+    ///
+    /// // Configure the project with all its paths, solc, cache etc.
+    /// // where the root dir is the current Rust project.
+    /// let paths = ProjectPathsConfig::hardhat(env!("CARGO_MANIFEST_DIR"))?;
+    /// let project = Project::builder().paths(paths).build()?;
+    /// let output = project.compile()?;
+    ///
+    /// // Tell Cargo to rerun this build script that if a source file changes.
     /// project.rerun_if_sources_changed();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn rerun_if_sources_changed(&self) {
         println!("cargo:rerun-if-changed={}", self.paths.sources.display())
@@ -259,21 +279,21 @@ impl<T: ArtifactOutput> Project<T> {
     /// NB: If the `svm` feature is enabled, this function will automatically detect
     /// solc versions across files.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::Project;
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile().unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[instrument(skip_all, name = "compile")]
     pub fn compile(&self) -> Result<ProjectCompileOutput<T>> {
         let sources = self.paths.read_input_files()?;
         trace!("found {} sources to compile: {:?}", sources.len(), sources.keys());
 
-        #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+        #[cfg(feature = "svm-solc")]
         if self.auto_detect {
             trace!("using solc auto detection to compile sources");
             return self.svm_compile(sources);
@@ -294,18 +314,18 @@ impl<T: ArtifactOutput> Project<T> {
     /// rules) with their imports, for example source contract `A(=0.8.11)` imports dependency
     /// `C(<0.8.0)`, which are incompatible.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::Source, utils, Project};
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
     /// let files = utils::source_files("./src");
-    /// let sources = Source::read_all(files).unwrap();
-    /// let output = project.svm_compile(sources).unwrap();
-    /// # }
+    /// let sources = Source::read_all(files)?;
+    /// let output = project.svm_compile(sources)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn svm_compile(&self, sources: Sources) -> Result<ProjectCompileOutput<T>> {
         project::ProjectCompiler::with_sources(self, sources)?.compile()
     }
@@ -313,16 +333,16 @@ impl<T: ArtifactOutput> Project<T> {
     /// Convenience function to compile a single solidity file with the project's settings.
     /// Same as [`Self::svm_compile()`] but with the given `file` as input.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::Project;
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile_file("example/Greeter.sol").unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile_file("example/Greeter.sol")?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn compile_file(&self, file: impl Into<PathBuf>) -> Result<ProjectCompileOutput<T>> {
         let file = file.into();
         let source = Source::read(&file)?;
@@ -332,14 +352,14 @@ impl<T: ArtifactOutput> Project<T> {
     /// Convenience function to compile a series of solidity files with the project's settings.
     /// Same as [`Self::compile()`] but with the given `files` as input.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::Project;
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile_files(vec!["examples/Foo.sol", "examples/Bar.sol"]).unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile_files(["examples/Foo.sol", "examples/Bar.sol"])?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile_files<P, I>(&self, files: I) -> Result<ProjectCompileOutput<T>>
     where
@@ -348,7 +368,7 @@ impl<T: ArtifactOutput> Project<T> {
     {
         let sources = Source::read_all(files)?;
 
-        #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+        #[cfg(feature = "svm-solc")]
         if self.auto_detect {
             return project::ProjectCompiler::with_sources(self, sources)?.compile();
         }
@@ -357,35 +377,38 @@ impl<T: ArtifactOutput> Project<T> {
         self.compile_with_version(&solc, sources)
     }
 
-    /// Convenience function to compile only (re)compile files that match the provided [FileFilter].
-    /// Same as [`Self::compile()`] but with only with those files as input that match
-    /// [FileFilter::is_match()].
+    /// Convenience function to compile only files that match the provided [FileFilter].
     ///
-    /// # Example - Only compile Test files
+    /// Same as [`Self::compile()`] but with only with the input files that match
+    /// [`FileFilter::is_match()`].
     ///
-    /// ```
+    /// # Examples
+    ///
+    /// Only compile test files:
+    ///
+    /// ```no_run
     /// use foundry_compilers::{Project, TestFileFilter};
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile_sparse(TestFileFilter::default()).unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile_sparse(Box::new(TestFileFilter::default()))?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// # Example - Apply a custom filter
+    /// Apply a custom filter:
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::Project;
     /// use std::path::Path;
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile_sparse(|path: &Path| path.ends_with("Greeter.sol")).unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile_sparse(Box::new(|path: &Path| path.ends_with("Greeter.sol")))?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile_sparse(&self, filter: Box<dyn FileFilter>) -> Result<ProjectCompileOutput<T>> {
         let sources =
             Source::read_all(self.paths.input_files().into_iter().filter(|p| filter.is_match(p)))?;
 
-        #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+        #[cfg(feature = "svm-solc")]
         if self.auto_detect {
             return project::ProjectCompiler::with_sources(self, sources)?
                 .with_sparse_output(filter)
@@ -405,20 +428,16 @@ impl<T: ArtifactOutput> Project<T> {
     /// file and cleans up entries for files which may have been removed. Unchanged files that
     /// for which an artifact exist, are not compiled again.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{Project, Solc};
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let sources = project.paths.read_sources().unwrap();
-    /// project
-    ///     .compile_with_version(
-    ///         &Solc::find_svm_installed_version("0.8.11").unwrap().unwrap(),
-    ///         sources,
-    ///     )
-    ///     .unwrap();
-    /// # }
+    ///
+    /// let project = Project::builder().build()?;
+    /// let sources = project.paths.read_sources()?;
+    /// let solc = Solc::find_svm_installed_version("0.8.11")?.unwrap();
+    /// project.compile_with_version(&solc, sources)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile_with_version(
         &self,
@@ -432,20 +451,20 @@ impl<T: ArtifactOutput> Project<T> {
     ///
     /// If the cache file was the only file in the folder, this also removes the empty folder.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use foundry_compilers::Project;
-    /// # fn demo(project: Project) {
-    /// let project = Project::builder().build().unwrap();
-    /// let _ = project.compile().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let _ = project.compile()?;
     /// assert!(project.artifacts_path().exists());
     /// assert!(project.cache_path().exists());
     ///
     /// project.cleanup();
     /// assert!(!project.artifacts_path().exists());
     /// assert!(!project.cache_path().exists());
-    /// # }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn cleanup(&self) -> std::result::Result<(), SolcIoError> {
         trace!("clean up project");
@@ -466,11 +485,21 @@ impl<T: ArtifactOutput> Project<T> {
             }
             trace!("removed cache file \"{}\"", self.cache_path().display());
         }
-        if self.paths.artifacts.exists() {
+
+        // clean the artifacts dir
+        if self.artifacts_path().exists() {
             std::fs::remove_dir_all(self.artifacts_path())
                 .map_err(|err| SolcIoError::new(err, self.artifacts_path().clone()))?;
             trace!("removed artifacts dir \"{}\"", self.artifacts_path().display());
         }
+
+        // also clean the build-info dir, in case it's not nested in the artifacts dir
+        if self.build_info_path().exists() {
+            std::fs::remove_dir_all(self.build_info_path())
+                .map_err(|err| SolcIoError::new(err, self.build_info_path().clone()))?;
+            tracing::trace!("removed build-info dir \"{}\"", self.build_info_path().display());
+        }
+
         Ok(())
     }
 
@@ -555,6 +584,8 @@ pub struct ProjectBuilder<T: ArtifactOutput = ConfigurableArtifacts> {
     artifacts: T,
     /// Which error codes to ignore
     pub ignored_error_codes: Vec<u64>,
+    /// Which file paths to ignore
+    pub ignored_file_paths: Vec<PathBuf>,
     /// The minimum severity level that is treated as a compiler error
     compiler_severity_filter: Severity,
     /// All allowed paths for solc's `--allowed-paths`
@@ -579,6 +610,7 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
             slash_paths: true,
             artifacts,
             ignored_error_codes: Vec::new(),
+            ignored_file_paths: Vec::new(),
             compiler_severity_filter: Severity::Error,
             allowed_paths: Default::default(),
             include_paths: Default::default(),
@@ -615,6 +647,11 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
         for code in codes {
             self = self.ignore_error_code(code);
         }
+        self
+    }
+
+    pub fn ignore_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.ignored_file_paths = paths;
         self
     }
 
@@ -729,6 +766,7 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
             offline,
             build_info,
             slash_paths,
+            ignored_file_paths,
             ..
         } = self;
         ProjectBuilder {
@@ -742,6 +780,7 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
             slash_paths,
             artifacts,
             ignored_error_codes,
+            ignored_file_paths,
             compiler_severity_filter,
             allowed_paths,
             include_paths,
@@ -800,6 +839,7 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
             auto_detect,
             artifacts,
             ignored_error_codes,
+            ignored_file_paths,
             compiler_severity_filter,
             mut allowed_paths,
             include_paths,
@@ -832,10 +872,13 @@ impl<T: ArtifactOutput> ProjectBuilder<T> {
             auto_detect,
             artifacts,
             ignored_error_codes,
+            ignored_file_paths,
             compiler_severity_filter,
             allowed_paths,
             include_paths,
-            solc_jobs: solc_jobs.unwrap_or_else(num_cpus::get),
+            solc_jobs: solc_jobs
+                .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
+                .unwrap_or(1),
             offline,
             slash_paths,
         })
@@ -856,21 +899,17 @@ impl<T: ArtifactOutput> ArtifactOutput for Project<T> {
         contracts: &VersionedContracts,
         sources: &VersionedSourceFiles,
         layout: &ProjectPathsConfig,
-        ctx: OutputContext,
+        ctx: OutputContext<'_>,
     ) -> Result<Artifacts<Self::Artifact>> {
         self.artifacts_handler().on_output(contracts, sources, layout, ctx)
     }
 
-    fn write_contract_extras(&self, contract: &Contract, file: &Path) -> Result<()> {
-        self.artifacts_handler().write_contract_extras(contract, file)
-    }
-
-    fn write_extras(
+    fn handle_artifacts(
         &self,
         contracts: &VersionedContracts,
         artifacts: &Artifacts<Self::Artifact>,
     ) -> Result<()> {
-        self.artifacts_handler().write_extras(contracts, artifacts)
+        self.artifacts_handler().handle_artifacts(contracts, artifacts)
     }
 
     fn output_file_name(name: impl AsRef<str>) -> PathBuf {
@@ -931,7 +970,7 @@ impl<T: ArtifactOutput> ArtifactOutput for Project<T> {
         &self,
         contracts: &VersionedContracts,
         sources: &VersionedSourceFiles,
-        ctx: OutputContext,
+        ctx: OutputContext<'_>,
         layout: &ProjectPathsConfig,
     ) -> Artifacts<Self::Artifact> {
         self.artifacts_handler().output_to_artifacts(contracts, sources, ctx, layout)
@@ -943,6 +982,14 @@ impl<T: ArtifactOutput> ArtifactOutput for Project<T> {
         file: &VersionedSourceFile,
     ) -> Option<Self::Artifact> {
         self.artifacts_handler().standalone_source_file_to_artifact(path, file)
+    }
+
+    fn is_dirty(&self, artifact_file: &ArtifactFile<Self::Artifact>) -> Result<bool> {
+        self.artifacts_handler().is_dirty(artifact_file)
+    }
+
+    fn handle_cached_artifacts(&self, artifacts: &Artifacts<Self::Artifact>) -> Result<()> {
+        self.artifacts_handler().handle_cached_artifacts(artifacts)
     }
 }
 
@@ -1003,12 +1050,13 @@ fn rebase_path(base: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
 }
 
 #[cfg(test)]
-#[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+#[cfg(feature = "svm-solc")]
 mod tests {
     use super::*;
     use crate::remappings::Remapping;
 
     #[test]
+    #[cfg_attr(windows, ignore = "<0.7 solc is flaky")]
     fn test_build_all_versions() {
         let paths = ProjectPathsConfig::builder()
             .root("./test-data/test-contract-versions")
@@ -1016,7 +1064,7 @@ mod tests {
             .build()
             .unwrap();
         let project = Project::builder().paths(paths).no_artifacts().ephemeral().build().unwrap();
-        let contracts = project.compile().unwrap().succeeded().output().contracts;
+        let contracts = project.compile().unwrap().succeeded().into_output().contracts;
         // Contracts A to F
         assert_eq!(contracts.contracts().count(), 3);
     }
@@ -1044,7 +1092,7 @@ mod tests {
             .no_artifacts()
             .build()
             .unwrap();
-        let contracts = project.compile().unwrap().succeeded().output().contracts;
+        let contracts = project.compile().unwrap().succeeded().into_output().contracts;
         assert_eq!(contracts.contracts().count(), 3);
     }
 
@@ -1059,7 +1107,7 @@ mod tests {
             .build()
             .unwrap();
         let project = Project::builder().no_artifacts().paths(paths).ephemeral().build().unwrap();
-        let contracts = project.compile().unwrap().succeeded().output().contracts;
+        let contracts = project.compile().unwrap().succeeded().into_output().contracts;
         assert_eq!(contracts.contracts().count(), 2);
     }
 

@@ -13,7 +13,12 @@ use crate::{
 use contracts::{VersionedContract, VersionedContracts};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, path::Path};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    fmt,
+    path::{Path, PathBuf},
+};
 use yansi::Paint;
 
 pub mod contracts;
@@ -32,6 +37,8 @@ pub struct ProjectCompileOutput<T: ArtifactOutput = ConfigurableArtifacts> {
     pub(crate) cached_artifacts: Artifacts<T::Artifact>,
     /// errors that should be omitted
     pub(crate) ignored_error_codes: Vec<u64>,
+    /// paths that should be omitted
+    pub(crate) ignored_file_paths: Vec<PathBuf>,
     /// set minimum level of severity that is treated as an error
     pub(crate) compiler_severity_filter: Severity,
 }
@@ -64,15 +71,16 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     ///
     /// This returns a chained iterator of both cached and recompiled contract artifacts
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{ArtifactId, ConfigurableContractArtifact, Project};
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
+    /// let project = Project::builder().build()?;
     /// let contracts: BTreeMap<ArtifactId, ConfigurableContractArtifact> =
-    ///     project.compile().unwrap().into_artifacts().collect();
+    ///     project.compile()?.into_artifacts().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn into_artifacts(self) -> impl Iterator<Item = (ArtifactId, T::Artifact)> {
         let Self { cached_artifacts, compiled_artifacts, .. } = self;
@@ -82,15 +90,16 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     /// This returns a chained iterator of both cached and recompiled contract artifacts that yields
     /// the contract name and the corresponding artifact
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{ConfigurableContractArtifact, Project};
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
+    /// let project = Project::builder().build()?;
     /// let artifacts: BTreeMap<String, &ConfigurableContractArtifact> =
-    ///     project.compile().unwrap().artifacts().collect();
+    ///     project.compile()?.artifacts().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn artifacts(&self) -> impl Iterator<Item = (String, &T::Artifact)> {
         self.versioned_artifacts().map(|(name, (artifact, _))| (name, artifact))
@@ -99,16 +108,17 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     /// This returns a chained iterator of both cached and recompiled contract artifacts that yields
     /// the contract name and the corresponding artifact with its version
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{ConfigurableContractArtifact, Project};
     /// use semver::Version;
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
+    /// let project = Project::builder().build()?;
     /// let artifacts: BTreeMap<String, (&ConfigurableContractArtifact, &Version)> =
-    ///     project.compile().unwrap().versioned_artifacts().collect();
+    ///     project.compile()?.versioned_artifacts().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn versioned_artifacts(&self) -> impl Iterator<Item = (String, (&T::Artifact, &Version))> {
         self.cached_artifacts
@@ -141,15 +151,16 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     ///
     /// This returns a chained iterator of both cached and recompiled contract artifacts
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{ConfigurableContractArtifact, Project};
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
+    /// let project = Project::builder().build()?;
     /// let contracts: Vec<(String, String, ConfigurableContractArtifact)> =
-    ///     project.compile().unwrap().into_artifacts_with_files().collect();
+    ///     project.compile()?.into_artifacts_with_files().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// **NOTE** the `file` will be returned as is, see also [`Self::with_stripped_file_prefixes()`]
@@ -183,15 +194,16 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     /// Strips the given prefix from all artifact file paths to make them relative to the given
     /// `base` argument
     ///
-    /// # Example
+    /// # Examples
     ///
     /// Make all artifact files relative to the project's root directory
     ///
     /// ```no_run
     /// use foundry_compilers::Project;
     ///
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile().unwrap().with_stripped_file_prefixes(project.root());
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?.with_stripped_file_prefixes(project.root());
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn with_stripped_file_prefixes(mut self, base: impl AsRef<Path>) -> Self {
         let base = base.as_ref();
@@ -201,16 +213,30 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
         self
     }
 
-    /// Get the (merged) solc compiler output
+    /// Returns a reference to the (merged) solc compiler output.
+    ///
+    /// # Examples
+    ///
     /// ```no_run
     /// use foundry_compilers::{artifacts::contract::Contract, Project};
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
+    /// let project = Project::builder().build()?;
     /// let contracts: BTreeMap<String, Contract> =
-    ///     project.compile().unwrap().output().contracts_into_iter().collect();
+    ///     project.compile()?.into_output().contracts_into_iter().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn output(self) -> AggregatedCompilerOutput {
+    pub fn output(&self) -> &AggregatedCompilerOutput {
+        &self.compiler_output
+    }
+
+    /// Returns a mutable reference to the (merged) solc compiler output.
+    pub fn output_mut(&mut self) -> &mut AggregatedCompilerOutput {
+        &mut self.compiler_output
+    }
+
+    /// Consumes the output and returns the (merged) solc compiler output.
+    pub fn into_output(self) -> AggregatedCompilerOutput {
         self.compiler_output
     }
 
@@ -226,12 +252,17 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
 
     /// Returns whether any errors were emitted by the compiler.
     pub fn has_compiler_errors(&self) -> bool {
-        self.compiler_output.has_error(&self.ignored_error_codes, &self.compiler_severity_filter)
+        self.compiler_output.has_error(
+            &self.ignored_error_codes,
+            &self.ignored_file_paths,
+            &self.compiler_severity_filter,
+        )
     }
 
     /// Returns whether any warnings were emitted by the compiler.
     pub fn has_compiler_warnings(&self) -> bool {
-        self.compiler_output.has_warning(&self.ignored_error_codes)
+        let filter = ErrorFilter::new(&self.ignored_error_codes, &self.ignored_file_paths);
+        self.compiler_output.has_warning(filter)
     }
 
     /// Panics if any errors were emitted by the compiler.
@@ -285,19 +316,18 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     /// where `path` is optional.
     ///
     /// If the `path` segment is `None`, then the first matching `Contract` is returned, see
-    /// [Self::remove_first]
+    /// [`Self::remove_first`].
     ///
-    /// # Example
+    /// # Examples
     ///
-    ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, info::ContractInfo, Project};
     ///
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap();
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?;
     /// let info = ContractInfo::new("src/Greeter.sol:Greeter");
     /// let contract = output.find_contract(&info).unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn find_contract<'a>(&self, info: impl Into<ContractInfoRef<'a>>) -> Option<&T::Artifact> {
         let ContractInfoRef { path, name } = info.into();
@@ -310,14 +340,15 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
 
     /// Finds the artifact with matching path and name
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?;
     /// let contract = output.find("src/Greeter.sol", "Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn find(&self, path: impl AsRef<str>, contract: impl AsRef<str>) -> Option<&T::Artifact> {
         let contract_path = path.as_ref();
@@ -339,14 +370,15 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
 
     /// Finds the artifact with matching path and name
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?;
     /// let contract = output.find("src/Greeter.sol", "Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove(
         &mut self,
@@ -363,14 +395,15 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
 
     /// Removes the _first_ contract with the given name from the set
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let mut output = project.compile().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let mut output = project.compile()?;
     /// let contract = output.remove_first("Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove_first(&mut self, contract_name: impl AsRef<str>) -> Option<T::Artifact> {
         let contract_name = contract_name.as_ref();
@@ -387,15 +420,16 @@ impl<T: ArtifactOutput> ProjectCompileOutput<T> {
     /// [Self::remove_first]
     ///
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, info::ContractInfo, Project};
-    /// # fn demo(project: Project) {
-    /// let mut output = project.compile().unwrap();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let mut output = project.compile()?;
     /// let info = ContractInfo::new("src/Greeter.sol:Greeter");
     /// let contract = output.remove_contract(&info).unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove_contract<'a>(
         &mut self,
@@ -414,7 +448,7 @@ impl ProjectCompileOutput<ConfigurableArtifacts> {
     /// A helper functions that extracts the underlying [`CompactContractBytecode`] from the
     /// [`crate::ConfigurableContractArtifact`]
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::{
@@ -423,9 +457,9 @@ impl ProjectCompileOutput<ConfigurableArtifacts> {
     /// };
     /// use std::collections::btree_map::BTreeMap;
     ///
-    /// let project = Project::builder().build().unwrap();
-    /// let contracts: ArtifactContracts =
-    ///     project.compile().unwrap().into_contract_bytecodes().collect();
+    /// let project = Project::builder().build()?;
+    /// let contracts: ArtifactContracts = project.compile()?.into_contract_bytecodes().collect();
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn into_contract_bytecodes(
         self,
@@ -441,7 +475,11 @@ impl<T: ArtifactOutput> fmt::Display for ProjectCompileOutput<T> {
             f.write_str("Nothing to compile")
         } else {
             self.compiler_output
-                .diagnostics(&self.ignored_error_codes, self.compiler_severity_filter)
+                .diagnostics(
+                    &self.ignored_error_codes,
+                    &self.ignored_file_paths,
+                    self.compiler_severity_filter,
+                )
                 .fmt(f)
         }
     }
@@ -462,6 +500,46 @@ pub struct AggregatedCompilerOutput {
     pub build_infos: BTreeMap<Version, RawBuildInfo>,
 }
 
+/// How to filter errors/warnings
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorFilter<'a> {
+    /// Ignore errors/warnings with these codes
+    pub error_codes: Cow<'a, [u64]>,
+    /// Ignore errors/warnings from these file paths
+    pub ignored_file_paths: Cow<'a, [PathBuf]>,
+}
+
+impl<'a> ErrorFilter<'a> {
+    /// Creates a new `ErrorFilter` with the given error codes and ignored file paths
+    pub fn new(error_codes: &'a [u64], ignored_file_paths: &'a [PathBuf]) -> Self {
+        ErrorFilter {
+            error_codes: Cow::Borrowed(error_codes),
+            ignored_file_paths: Cow::Borrowed(ignored_file_paths),
+        }
+    }
+    /// Helper function to check if an error code is ignored
+    pub fn is_code_ignored(&self, code: Option<u64>) -> bool {
+        match code {
+            Some(code) => self.error_codes.contains(&code),
+            None => false,
+        }
+    }
+
+    /// Helper function to check if an error's file path is ignored
+    pub fn is_file_ignored(&self, file_path: &Path) -> bool {
+        self.ignored_file_paths.iter().any(|ignored_path| file_path.starts_with(ignored_path))
+    }
+}
+
+impl<'a> From<&'a [u64]> for ErrorFilter<'a> {
+    fn from(error_codes: &'a [u64]) -> Self {
+        ErrorFilter {
+            error_codes: Cow::Borrowed(error_codes),
+            ignored_file_paths: Cow::Borrowed(&[]),
+        }
+    }
+}
+
 impl AggregatedCompilerOutput {
     /// Converts all `\\` separators in _all_ paths to `/`
     pub fn slash_paths(&mut self) {
@@ -470,15 +548,27 @@ impl AggregatedCompilerOutput {
     }
 
     /// Whether the output contains a compiler error
+    ///
+    /// This adheres to the given `compiler_severity_filter` and also considers [Error] with the
+    /// given [Severity] as errors. For example [Severity::Warning] will consider [Error]s with
+    /// [Severity::Warning] and [Severity::Error] as errors.
     pub fn has_error(
         &self,
         ignored_error_codes: &[u64],
+        ignored_file_paths: &[PathBuf],
         compiler_severity_filter: &Severity,
     ) -> bool {
         self.errors.iter().any(|err| {
+            if err.is_error() {
+                // [Severity::Error] is always treated as an error
+                return true;
+            }
+            // check if the filter is set to something higher than the error's severity
             if compiler_severity_filter.ge(&err.severity) {
                 if compiler_severity_filter.is_warning() {
-                    return self.has_warning(ignored_error_codes);
+                    // skip ignored error codes and file path from warnings
+                    let filter = ErrorFilter::new(ignored_error_codes, ignored_file_paths);
+                    return self.has_warning(filter);
                 }
                 return true;
             }
@@ -486,23 +576,41 @@ impl AggregatedCompilerOutput {
         })
     }
 
-    /// Whether the output contains a compiler warning
-    pub fn has_warning(&self, ignored_error_codes: &[u64]) -> bool {
-        self.errors.iter().any(|err| {
-            if err.severity.is_warning() {
-                err.error_code.as_ref().map_or(false, |code| !ignored_error_codes.contains(code))
-            } else {
-                false
+    /// Checks if there are any compiler warnings that are not ignored by the specified error codes
+    /// and file paths.
+    pub fn has_warning<'a>(&self, filter: impl Into<ErrorFilter<'a>>) -> bool {
+        let filter: ErrorFilter<'_> = filter.into();
+        self.errors.iter().any(|error| {
+            if !error.severity.is_warning() {
+                return false;
             }
+
+            let is_code_ignored = filter.is_code_ignored(error.error_code);
+
+            let is_file_ignored = error
+                .source_location
+                .as_ref()
+                .map_or(false, |location| filter.is_file_ignored(Path::new(&location.file)));
+
+            // Only consider warnings that are not ignored by either code or file path.
+            // Hence, return `true` for warnings that are not ignored, making the function
+            // return `true` if any such warnings exist.
+            !(is_code_ignored || is_file_ignored)
         })
     }
 
     pub fn diagnostics<'a>(
         &'a self,
         ignored_error_codes: &'a [u64],
+        ignored_file_paths: &'a [PathBuf],
         compiler_severity_filter: Severity,
-    ) -> OutputDiagnostics {
-        OutputDiagnostics { compiler_output: self, ignored_error_codes, compiler_severity_filter }
+    ) -> OutputDiagnostics<'a> {
+        OutputDiagnostics {
+            compiler_output: self,
+            ignored_error_codes,
+            ignored_file_paths,
+            compiler_severity_filter,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -566,29 +674,31 @@ impl AggregatedCompilerOutput {
 
     /// Finds the _first_ contract with the given name
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?.into_output();
     /// let contract = output.find_first("Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn find_first(&self, contract: impl AsRef<str>) -> Option<CompactContractRef> {
+    pub fn find_first(&self, contract: impl AsRef<str>) -> Option<CompactContractRef<'_>> {
         self.contracts.find_first(contract)
     }
 
     /// Removes the _first_ contract with the given name from the set
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let mut output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let mut output = project.compile()?.into_output();
     /// let contract = output.remove_first("Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove_first(&mut self, contract: impl AsRef<str>) -> Option<Contract> {
         self.contracts.remove_first(contract)
@@ -596,14 +706,15 @@ impl AggregatedCompilerOutput {
 
     /// Removes the contract with matching path and name
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let mut output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let mut output = project.compile()?.into_output();
     /// let contract = output.remove("src/Greeter.sol", "Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove(&mut self, path: impl AsRef<str>, contract: impl AsRef<str>) -> Option<Contract> {
         self.contracts.remove(path, contract)
@@ -615,17 +726,16 @@ impl AggregatedCompilerOutput {
     /// If the `path` segment is `None`, then the first matching `Contract` is returned, see
     /// [Self::remove_first]
     ///
+    /// # Examples
     ///
-    ///
-    /// # Example
-    ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, info::ContractInfo, Project};
-    /// # fn demo(project: Project) {
-    /// let mut output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let mut output = project.compile()?.into_output();
     /// let info = ContractInfo::new("src/Greeter.sol:Greeter");
     /// let contract = output.remove_contract(&info).unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove_contract<'a>(
         &mut self,
@@ -676,35 +786,38 @@ impl AggregatedCompilerOutput {
     }
 
     /// Given the contract file's path and the contract's name, tries to return the contract's
-    /// bytecode, runtime bytecode, and abi
-    /// # Example
+    /// bytecode, runtime bytecode, and ABI.
     ///
-    /// ```
+    /// # Examples
+    ///
+    /// ```no_run
     /// use foundry_compilers::{artifacts::*, Project};
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?.into_output();
     /// let contract = output.get("src/Greeter.sol", "Greeter").unwrap();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn get(
         &self,
         path: impl AsRef<str>,
         contract: impl AsRef<str>,
-    ) -> Option<CompactContractRef> {
+    ) -> Option<CompactContractRef<'_>> {
         self.contracts.get(path, contract)
     }
 
     /// Returns the output's source files and contracts separately, wrapped in helper types that
     /// provide several helper methods
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use foundry_compilers::Project;
-    /// # fn demo(project: Project) {
-    /// let output = project.compile().unwrap().output();
+    ///
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?.into_output();
     /// let (sources, contracts) = output.split();
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn split(self) -> (VersionedSourceFiles, VersionedContracts) {
         (self.sources, self.contracts)
@@ -723,15 +836,16 @@ impl AggregatedCompilerOutput {
     ///
     /// Convenience method for [Self::strip_prefix_all()] that consumes the type.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// Make all sources and contracts relative to the project's root directory
     ///
     /// ```no_run
     /// use foundry_compilers::Project;
     ///
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile().unwrap().output().with_stripped_file_prefixes(project.root());
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?.into_output().with_stripped_file_prefixes(project.root());
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn with_stripped_file_prefixes(mut self, base: impl AsRef<Path>) -> Self {
         let base = base.as_ref();
@@ -756,6 +870,8 @@ pub struct OutputDiagnostics<'a> {
     compiler_output: &'a AggregatedCompilerOutput,
     /// the error codes to ignore
     ignored_error_codes: &'a [u64],
+    /// the file paths to ignore
+    ignored_file_paths: &'a [PathBuf],
     /// set minimum level of severity that is treated as an error
     compiler_severity_filter: Severity,
 }
@@ -763,12 +879,17 @@ pub struct OutputDiagnostics<'a> {
 impl<'a> OutputDiagnostics<'a> {
     /// Returns true if there is at least one error of high severity
     pub fn has_error(&self) -> bool {
-        self.compiler_output.has_error(self.ignored_error_codes, &self.compiler_severity_filter)
+        self.compiler_output.has_error(
+            self.ignored_error_codes,
+            self.ignored_file_paths,
+            &self.compiler_severity_filter,
+        )
     }
 
     /// Returns true if there is at least one warning
     pub fn has_warning(&self) -> bool {
-        self.compiler_output.has_warning(self.ignored_error_codes)
+        let filter = ErrorFilter::new(self.ignored_error_codes, self.ignored_file_paths);
+        self.compiler_output.has_warning(filter)
     }
 
     /// Returns true if the contract is a expected to be a test
@@ -805,6 +926,13 @@ impl<'a> fmt::Display for OutputDiagnostics<'a> {
                         // from a test file we skip
                         ignored =
                             self.is_test(&source_location.file) && (code == 1878 || code == 5574);
+
+                        // we ignore warnings coming from ignored files
+                        let source_path = Path::new(&source_location.file);
+                        ignored |= self
+                            .ignored_file_paths
+                            .iter()
+                            .any(|ignored_path| source_path.starts_with(ignored_path));
                     }
 
                     ignored |= self.ignored_error_codes.contains(&code);

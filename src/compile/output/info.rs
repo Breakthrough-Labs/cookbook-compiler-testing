@@ -1,6 +1,6 @@
 //! Commonly used identifiers for contracts in the compiled output.
 
-use std::{borrow::Cow, convert::TryFrom, fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -26,10 +26,11 @@ impl ContractInfo {
     ///
     /// otherwise the `name` of the new object will be `info`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use foundry_compilers::info::ContractInfo;
+    ///
     /// let info = ContractInfo::new("src/Greeter.sol:Greeter");
     /// assert_eq!(
     ///     info,

@@ -25,6 +25,8 @@ pub enum SolcError {
     /// Errors related to the Solc executable itself.
     #[error("solc exited with {0}\n{1}")]
     SolcError(std::process::ExitStatus, String),
+    #[error("invalid UTF-8 in Solc output")]
+    InvalidUtf8,
     #[error("missing pragma from Solidity file")]
     PragmaNotFound,
     #[error("could not find Solc version locally or upstream")]
@@ -49,18 +51,16 @@ pub enum SolcError {
     #[error("file cannot be resolved due to mismatch of file name case: {error}.\nFound existing file: {existing_file:?}\nPlease check the case of the import.")]
     ResolveCaseSensitiveFileName { error: SolcIoError, existing_file: PathBuf },
     #[error(
-        r#"{0}.
-    --> {1:?}
-        {2:?}"#
+        "{0}\n\t\
+         --> {1}\n\t\
+         {2}"
     )]
     FailedResolveImport(Box<SolcError>, PathBuf, PathBuf),
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     #[error(transparent)]
     SvmError(#[from] svm::SolcVmError),
     #[error("no contracts found at \"{0}\"")]
     NoContracts(String),
-    #[error(transparent)]
-    PatternError(#[from] glob::PatternError),
     /// General purpose message.
     #[error("{0}")]
     Message(String),

@@ -4,11 +4,12 @@ use alloy_primitives::Address;
 use foundry_compilers::{
     artifacts::{
         BytecodeHash, DevDoc, ErrorDoc, EventDoc, Libraries, MethodDoc, ModelCheckerEngine::CHC,
-        ModelCheckerSettings, UserDoc, UserDocNotice,
+        ModelCheckerSettings, Severity, UserDoc, UserDocNotice,
     },
     buildinfo::BuildInfo,
     cache::{SolFilesCache, SOLIDITY_FILES_CACHE_FILENAME},
     error::SolcError,
+    flatten::Flattener,
     info::ContractInfo,
     project_util::*,
     remappings::Remapping,
@@ -386,6 +387,51 @@ contract B { }
 }
 
 #[test]
+fn can_clean_build_info() {
+    let mut project = TempProject::dapptools().unwrap();
+
+    project.project_mut().build_info = true;
+    project.project_mut().paths.build_infos = project.project_mut().paths.root.join("build-info");
+    project
+        .add_source(
+            "A",
+            r#"
+pragma solidity ^0.8.10;
+import "./B.sol";
+contract A { }
+"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "B",
+            r"
+pragma solidity ^0.8.10;
+contract B { }
+",
+        )
+        .unwrap();
+
+    let compiled = project.compile().unwrap();
+    compiled.assert_success();
+
+    let info_dir = project.project().build_info_path();
+    assert!(info_dir.exists());
+
+    let mut build_info_count = 0;
+    for entry in fs::read_dir(info_dir).unwrap() {
+        let _info = BuildInfo::read(entry.unwrap().path()).unwrap();
+        build_info_count += 1;
+    }
+    assert_eq!(build_info_count, 1);
+
+    project.project().cleanup().unwrap();
+
+    assert!(!project.project().build_info_path().exists());
+}
+
+#[test]
 fn can_compile_dapp_sample_with_cache() {
     let tmp_dir = tempfile::tempdir().unwrap();
     let root = tmp_dir.path();
@@ -472,23 +518,16 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> 
     Ok(())
 }
 
-#[test]
-fn can_flatten_file() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/test-contract-libs");
-    let target = root.join("src").join("Foo.sol");
-    let paths = ProjectPathsConfig::builder()
-        .sources(root.join("src"))
-        .lib(root.join("lib1"))
-        .lib(root.join("lib2"));
-    let project = TempProject::<ConfigurableArtifacts>::new(paths).unwrap();
+// Runs both `flatten` implementations, asserts that their outputs match and runs additional checks
+// against the output.
+fn test_flatteners(project: &TempProject, target: &Path, additional_checks: fn(&str)) {
+    let result = project.flatten(target).unwrap();
+    let solc_result =
+        Flattener::new(project.project(), &project.compile().unwrap(), target).unwrap().flatten();
 
-    let result = project.flatten(&target);
-    assert!(result.is_ok());
+    assert_eq!(result, solc_result);
 
-    let result = result.unwrap();
-    assert!(!result.contains("import"));
-    assert!(result.contains("contract Foo"));
-    assert!(result.contains("contract Bar"));
+    additional_checks(&result);
 }
 
 #[test]
@@ -501,13 +540,11 @@ fn can_flatten_file_with_external_lib() {
 
     let target = root.join("contracts").join("Greeter.sol");
 
-    let result = project.flatten(&target);
-    assert!(result.is_ok());
-
-    let result = result.unwrap();
-    assert!(!result.contains("import"));
-    assert!(result.contains("library console"));
-    assert!(result.contains("contract Greeter"));
+    test_flatteners(&project, &target, |result| {
+        assert!(!result.contains("import"));
+        assert!(result.contains("library console"));
+        assert!(result.contains("contract Greeter"));
+    });
 }
 
 #[test]
@@ -518,21 +555,19 @@ fn can_flatten_file_in_dapp_sample() {
 
     let target = root.join("src/Dapp.t.sol");
 
-    let result = project.flatten(&target);
-    assert!(result.is_ok());
-
-    let result = result.unwrap();
-    assert!(!result.contains("import"));
-    assert!(result.contains("contract DSTest"));
-    assert!(result.contains("contract Dapp"));
-    assert!(result.contains("contract DappTest"));
+    test_flatteners(&project, &target, |result| {
+        assert!(!result.contains("import"));
+        assert!(result.contains("contract DSTest"));
+        assert!(result.contains("contract Dapp"));
+        assert!(result.contains("contract DappTest"));
+    });
 }
 
 #[test]
 fn can_flatten_unique() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "A",
             r#"
@@ -566,26 +601,32 @@ contract C { }
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r#"pragma solidity ^0.8.10;
 
-    assert_eq!(
-        result,
-        r"pragma solidity ^0.8.10;
-
-contract C { }
+// src/B.sol
 
 contract B { }
 
+// src/C.sol
+
+contract C { }
+
+// src/A.sol
+
 contract A { }
-"
-    );
+"#
+        );
+    });
 }
 
 #[test]
 fn can_flatten_experimental_pragma() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "A",
             r#"
@@ -622,58 +663,60 @@ contract C { }
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
-
-    assert_eq!(
-        result,
-        r"pragma solidity ^0.8.10;
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r"pragma solidity ^0.8.10;
 pragma experimental ABIEncoderV2;
 
-contract C { }
+// src/B.sol
 
 contract B { }
 
+// src/C.sol
+
+contract C { }
+
+// src/A.sol
+
 contract A { }
 "
-    );
-}
-
-#[test]
-fn can_flatten_file_with_duplicates() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/test-flatten-duplicates");
-    let paths = ProjectPathsConfig::builder().sources(root.join("contracts"));
-    let project = TempProject::<ConfigurableArtifacts>::new(paths).unwrap();
-
-    let target = root.join("contracts/FooBar.sol");
-
-    let result = project.flatten(&target);
-    assert!(result.is_ok());
-
-    let result = result.unwrap();
-    assert_eq!(
-        result,
-        r"//SPDX-License-Identifier: UNLICENSED
-pragma solidity >=0.6.0;
-
-contract Bar {}
-
-contract Foo {}
-
-contract FooBar {}
-"
-    );
+        );
+    });
 }
 
 #[test]
 fn can_flatten_on_solang_failure() {
-    let root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/test-flatten-solang-failure");
-    let paths = ProjectPathsConfig::builder().sources(root.join("contracts"));
-    let project = TempProject::<ConfigurableArtifacts>::new(paths).unwrap();
+    let project = TempProject::dapptools().unwrap();
 
-    let target = root.join("contracts/Contract.sol");
+    project
+        .add_source(
+            "Lib",
+            r#"// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.10;
 
-    let result = project.flatten(&target);
+library Lib {}     
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "Contract",
+            r#"// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.10;
+
+import { Lib } from "./Lib.sol";
+
+// Intentionally erroneous code
+contract Contract {
+    failure();
+}
+"#,
+        )
+        .unwrap();
+
+    let result = project.flatten(target.as_path());
     assert!(result.is_ok());
 
     let result = result.unwrap();
@@ -682,7 +725,11 @@ fn can_flatten_on_solang_failure() {
         r"// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.10;
 
-library Lib {}
+// src/Lib.sol
+
+library Lib {}     
+
+// src/Contract.sol
 
 // Intentionally erroneous code
 contract Contract {
@@ -696,7 +743,7 @@ contract Contract {
 fn can_flatten_multiline() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "A",
             r#"
@@ -732,26 +779,33 @@ contract C { }
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
-    assert_eq!(
-        result,
-        r"pragma solidity ^0.8.10;
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r"pragma solidity ^0.8.10;
+
+// src/C.sol
 
 contract C { }
+
+// src/Errors.sol
 
 error IllegalArgument();
 error IllegalState();
 
+// src/A.sol
+
 contract A { }
 "
-    );
+        );
+    });
 }
 
 #[test]
 fn can_flatten_remove_extra_spacing() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "A",
             r#"pragma solidity ^0.8.10;
@@ -784,30 +838,37 @@ contract C { }
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
-    assert_eq!(
-        result,
-        r"pragma solidity ^0.8.10;
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r"pragma solidity ^0.8.10;
+
+// src/C.sol
 
 contract C { }
 
+// src/B.sol
 // This is a B Contract
 
 contract B { }
 
+// src/A.sol
+
 contract A { }
 "
-    );
+        );
+    });
 }
 
 #[test]
 fn can_flatten_with_alias() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "Contract",
             r#"pragma solidity ^0.8.10;
+
 import { ParentContract as Parent } from "./Parent.sol";
 import { AnotherParentContract as AnotherParent } from "./AnotherParent.sol";
 import { PeerContract as Peer } from "./Peer.sol";
@@ -825,14 +886,10 @@ contract Contract is Parent,
 
     Peer public peer;
 
-    error Peer();
-
     constructor(address _peer) {
         peer = Peer(_peer);
-    }
-
-    function Math(uint256 value) external pure returns (uint256) {
-        return Math.minusOne(Math.max() - value.diffMax());
+        peer = new Peer();
+        uint256 x = Math.minusOne(Math.max());
     }
 }
 "#,
@@ -843,6 +900,7 @@ contract Contract is Parent,
         .add_source(
             "Parent",
             r"pragma solidity ^0.8.10;
+
 contract ParentContract { }
 ",
         )
@@ -852,6 +910,7 @@ contract ParentContract { }
         .add_source(
             "AnotherParent",
             r"pragma solidity ^0.8.10;
+
 contract AnotherParentContract { }
 ",
         )
@@ -861,6 +920,7 @@ contract AnotherParentContract { }
         .add_source(
             "Peer",
             r"pragma solidity ^0.8.10;
+
 contract PeerContract { }
 ",
         )
@@ -870,6 +930,7 @@ contract PeerContract { }
         .add_source(
             "Math",
             r"pragma solidity ^0.8.10;
+
 library MathLibrary {
     function minusOne(uint256 val) internal returns (uint256) {
         return val - 1;
@@ -891,21 +952,22 @@ library MathLibrary {
         .add_source(
             "SomeLib",
             r"pragma solidity ^0.8.10;
+
 library SomeLib { }
 ",
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
-    assert_eq!(
-        result,
-        r#"pragma solidity ^0.8.10;
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r#"pragma solidity ^0.8.10;
 
-contract ParentContract { }
+// src/AnotherParent.sol
 
 contract AnotherParentContract { }
 
-contract PeerContract { }
+// src/Math.sol
 
 library MathLibrary {
     function minusOne(uint256 val) internal returns (uint256) {
@@ -921,7 +983,19 @@ library MathLibrary {
     }
 }
 
+// src/Parent.sol
+
+contract ParentContract { }
+
+// src/Peer.sol
+
+contract PeerContract { }
+
+// src/SomeLib.sol
+
 library SomeLib { }
+
+// src/Contract.sol
 
 contract Contract is ParentContract,
     AnotherParentContract {
@@ -934,25 +1008,22 @@ contract Contract is ParentContract,
 
     PeerContract public peer;
 
-    error Peer();
-
     constructor(address _peer) {
         peer = PeerContract(_peer);
-    }
-
-    function Math(uint256 value) external pure returns (uint256) {
-        return MathLibrary.minusOne(MathLibrary.max() - value.diffMax());
+        peer = new PeerContract();
+        uint256 x = MathLibrary.minusOne(MathLibrary.max());
     }
 }
 "#
-    );
+        );
+    });
 }
 
 #[test]
 fn can_flatten_with_version_pragma_after_imports() {
     let project = TempProject::dapptools().unwrap();
 
-    let f = project
+    let target = project
         .add_source(
             "A",
             r#"
@@ -969,7 +1040,7 @@ contract A { }
         .add_source(
             "B",
             r#"
-import D from "./D.sol";
+import {D} from "./D.sol";
 pragma solidity ^0.8.10;
 import * as C from "./C.sol";
 contract B { }
@@ -997,18 +1068,340 @@ contract D { }
         )
         .unwrap();
 
-    let result = project.flatten(&f).unwrap();
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r#"pragma solidity ^0.8.10;
+
+// src/C.sol
+
+contract C { }
+
+// src/D.sol
+
+contract D { }
+
+// src/B.sol
+
+contract B { }
+
+// src/A.sol
+
+contract A { }
+"#
+        );
+    });
+}
+
+#[test]
+fn can_flatten_with_duplicates() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "Foo.sol",
+            r#"
+pragma solidity ^0.8.10;
+
+contract Foo {
+    function foo() public pure returns (uint256) {
+        return 1;
+    }
+}
+
+contract Bar is Foo {}
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "Bar.sol",
+            r#"
+pragma solidity ^0.8.10;
+import {Foo} from "./Foo.sol";
+
+contract Bar is Foo {}
+"#,
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
     assert_eq!(
         result,
         r"pragma solidity ^0.8.10;
 
-contract D { }
+// src/Foo.sol
 
-contract C { }
+contract Foo {
+    function foo() public pure returns (uint256) {
+        return 1;
+    }
+}
 
-contract B { }
+contract Bar_0 is Foo {}
 
-contract A { }
+// src/Bar.sol
+
+contract Bar_1 is Foo {}
+"
+    );
+}
+
+#[test]
+fn can_flatten_complex_aliases_setup_with_duplicates() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A.sol",
+            r#"
+pragma solidity ^0.8.10;
+
+contract A {
+    type SomeCustomValue is uint256;
+
+    struct SomeStruct {
+        uint256 field;
+    }
+
+    enum SomeEnum { VALUE1, VALUE2 }
+
+    function foo() public pure returns (uint256) {
+        return 1;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "B.sol",
+            r#"
+pragma solidity ^0.8.10;
+import "./A.sol" as A_File;
+
+contract A is A_File.A {}
+"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "C.sol",
+            r#"
+pragma solidity ^0.8.10;
+import "./B.sol" as B_File;
+
+contract A is B_File.A_File.A {}
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "D.sol",
+            r#"
+pragma solidity ^0.8.10;
+import "./C.sol" as C_File;
+
+C_File.B_File.A_File.A.SomeCustomValue constant fileLevelValue = C_File.B_File.A_File.A.SomeCustomValue.wrap(1);
+
+contract D is C_File.B_File.A_File.A {
+    C_File.B_File.A_File.A.SomeStruct public someStruct;
+    C_File.B_File.A_File.A.SomeEnum public someEnum = C_File.B_File.A_File.A.SomeEnum.VALUE1;
+
+    constructor() C_File.B_File.A_File.A() {
+        someStruct = C_File.B_File.A_File.A.SomeStruct(1);
+        someEnum = C_File.B_File.A_File.A.SomeEnum.VALUE2;
+    }
+
+    function getSelector() public pure returns (bytes4) {
+        return C_File.B_File.A_File.A.foo.selector;
+    }
+
+    function getEnumValue1() public pure returns (C_File.B_File.A_File.A.SomeEnum) {
+        return C_File.B_File.A_File.A.SomeEnum.VALUE1;
+    }
+
+    function getStruct() public pure returns (C_File.B_File.A_File.A.SomeStruct memory) {
+        return C_File.B_File.A_File.A.SomeStruct(1);
+    }
+}
+"#,).unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/A.sol
+
+contract A_0 {
+    type SomeCustomValue is uint256;
+
+    struct SomeStruct {
+        uint256 field;
+    }
+
+    enum SomeEnum { VALUE1, VALUE2 }
+
+    function foo() public pure returns (uint256) {
+        return 1;
+    }
+}
+
+// src/B.sol
+
+contract A_1 is A_0 {}
+
+// src/C.sol
+
+contract A_2 is A_0 {}
+
+// src/D.sol
+
+A_0.SomeCustomValue constant fileLevelValue = A_0.SomeCustomValue.wrap(1);
+
+contract D is A_0 {
+    A_0.SomeStruct public someStruct;
+    A_0.SomeEnum public someEnum = A_0.SomeEnum.VALUE1;
+
+    constructor() A_0() {
+        someStruct = A_0.SomeStruct(1);
+        someEnum = A_0.SomeEnum.VALUE2;
+    }
+
+    function getSelector() public pure returns (bytes4) {
+        return A_0.foo.selector;
+    }
+
+    function getEnumValue1() public pure returns (A_0.SomeEnum) {
+        return A_0.SomeEnum.VALUE1;
+    }
+
+    function getStruct() public pure returns (A_0.SomeStruct memory) {
+        return A_0.SomeStruct(1);
+    }
+}
+"
+    );
+}
+
+// https://github.com/foundry-rs/compilers/issues/34
+#[test]
+fn can_flatten_34_repro() {
+    let project = TempProject::dapptools().unwrap();
+    let target = project
+        .add_source(
+            "FlieA.sol",
+            r#"pragma solidity ^0.8.10;
+import {B} from "./FileB.sol";
+
+interface FooBar {
+    function foo() external;
+}
+contract A {
+    function execute() external {
+        FooBar(address(0)).foo();
+    }
+}"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "FileB.sol",
+            r#"pragma solidity ^0.8.10;
+
+interface FooBar {
+    function bar() external;
+}
+contract B {
+    function execute() external {
+        FooBar(address(0)).bar();
+    }
+}"#,
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r#"pragma solidity ^0.8.10;
+
+// src/FileB.sol
+
+interface FooBar_0 {
+    function bar() external;
+}
+contract B {
+    function execute() external {
+        FooBar_0(address(0)).bar();
+    }
+}
+
+// src/FlieA.sol
+
+interface FooBar_1 {
+    function foo() external;
+}
+contract A {
+    function execute() external {
+        FooBar_1(address(0)).foo();
+    }
+}
+"#
+    );
+}
+
+#[test]
+fn can_flatten_experimental_in_other_file() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A.sol",
+            r#"
+pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
+
+contract A {}
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "B.sol",
+            r#"
+pragma solidity 0.6.12;
+
+import "./A.sol";
+
+contract B is A {}
+"#,
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity =0.6.12;
+pragma experimental ABIEncoderV2;
+
+// src/A.sol
+
+contract A {}
+
+// src/B.sol
+
+contract B is A {}
 "
     );
 }
@@ -1034,6 +1427,436 @@ fn can_detect_type_error() {
 
     let compiled = project.compile().unwrap();
     assert!(compiled.has_compiler_errors());
+}
+
+#[test]
+fn can_flatten_aliases_with_pragma_and_license_after_source() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A",
+            r#"pragma solidity ^0.8.10;
+contract A { }
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "B",
+            r#"contract B is AContract {}
+import {A as AContract} from "./A.sol";
+pragma solidity ^0.8.10;"#,
+        )
+        .unwrap();
+
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r"pragma solidity ^0.8.10;
+
+// src/A.sol
+
+contract A { }
+
+// src/B.sol
+contract B is A {}
+"
+        );
+    });
+}
+
+#[test]
+fn can_flatten_rename_inheritdocs() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "DuplicateA",
+            r#"pragma solidity ^0.8.10;
+contract A {}
+"#,
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "A",
+            r#"pragma solidity ^0.8.10;
+import {A as OtherName} from "./DuplicateA.sol";
+
+contract A {
+    /// Documentation
+    function foo() public virtual {}
+}
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "B",
+            r#"pragma solidity ^0.8.10;
+import {A} from "./A.sol";
+
+contract B is A {
+    /// @inheritdoc A
+    function foo() public override {}
+}"#,
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/DuplicateA.sol
+
+contract A_0 {}
+
+// src/A.sol
+
+contract A_1 {
+    /// Documentation
+    function foo() public virtual {}
+}
+
+// src/B.sol
+
+contract B is A_1 {
+    /// @inheritdoc A_1
+    function foo() public override {}
+}
+"
+    );
+}
+
+#[test]
+fn can_flatten_rename_inheritdocs_alias() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A",
+            r#"pragma solidity ^0.8.10;
+
+contract A {
+    /// Documentation
+    function foo() public virtual {}
+}
+"#,
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "B",
+            r#"pragma solidity ^0.8.10;
+import {A as Alias} from "./A.sol";
+
+contract B is Alias {
+    /// @inheritdoc Alias
+    function foo() public override {}
+}"#,
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/A.sol
+
+contract A {
+    /// Documentation
+    function foo() public virtual {}
+}
+
+// src/B.sol
+
+contract B is A {
+    /// @inheritdoc A
+    function foo() public override {}
+}
+"
+    );
+}
+
+#[test]
+fn can_flatten_rename_user_defined_functions() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "CustomUint",
+            r"
+pragma solidity ^0.8.10;
+
+type CustomUint is uint256;
+
+function mul(CustomUint a, CustomUint b) pure returns(CustomUint) {
+    return CustomUint.wrap(CustomUint.unwrap(a) * CustomUint.unwrap(b));
+}
+
+using {mul} for CustomUint global;",
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "CustomInt",
+            r"pragma solidity ^0.8.10;
+
+type CustomInt is int256;
+
+function mul(CustomInt a, CustomInt b) pure returns(CustomInt) {
+    return CustomInt.wrap(CustomInt.unwrap(a) * CustomInt.unwrap(b));
+}
+
+using {mul} for CustomInt global;",
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "Target",
+            r"pragma solidity ^0.8.10;
+
+import {CustomInt} from './CustomInt.sol';
+import {CustomUint} from './CustomUint.sol';
+
+contract Foo {
+    function mul(CustomUint a, CustomUint b) public returns(CustomUint) {
+        return a.mul(b);
+    }
+
+    function mul(CustomInt a, CustomInt b) public returns(CustomInt) {
+        return a.mul(b);
+    }
+}",
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/CustomInt.sol
+
+type CustomInt is int256;
+
+function mul_0(CustomInt a, CustomInt b) pure returns(CustomInt) {
+    return CustomInt.wrap(CustomInt.unwrap(a) * CustomInt.unwrap(b));
+}
+
+using {mul_0} for CustomInt global;
+
+// src/CustomUint.sol
+
+type CustomUint is uint256;
+
+function mul_1(CustomUint a, CustomUint b) pure returns(CustomUint) {
+    return CustomUint.wrap(CustomUint.unwrap(a) * CustomUint.unwrap(b));
+}
+
+using {mul_1} for CustomUint global;
+
+// src/Target.sol
+
+contract Foo {
+    function mul(CustomUint a, CustomUint b) public returns(CustomUint) {
+        return a.mul_1(b);
+    }
+
+    function mul(CustomInt a, CustomInt b) public returns(CustomInt) {
+        return a.mul_0(b);
+    }
+}
+"
+    );
+}
+
+#[test]
+fn can_flatten_rename_global_functions() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "func1",
+            r"pragma solidity ^0.8.10;
+
+function func() view {}",
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "func2",
+            r"pragma solidity ^0.8.10;
+
+function func(uint256 x) view returns(uint256) {
+    return x + 1;
+}",
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "Target",
+            r"pragma solidity ^0.8.10;
+
+import {func as func1} from './func1.sol';
+import {func as func2} from './func2.sol';
+
+contract Foo {
+    constructor(uint256 x) {
+        func1();
+        func2(x);
+    }
+}",
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/func1.sol
+
+function func_0() view {}
+
+// src/func2.sol
+
+function func_1(uint256 x) view returns(uint256) {
+    return x + 1;
+}
+
+// src/Target.sol
+
+contract Foo {
+    constructor(uint256 x) {
+        func_0();
+        func_1(x);
+    }
+}
+"
+    );
+}
+
+#[test]
+fn can_flatten_rename_in_assembly() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A",
+            r"pragma solidity ^0.8.10;
+
+uint256 constant a = 1;",
+        )
+        .unwrap();
+
+    project
+        .add_source(
+            "B",
+            r"pragma solidity ^0.8.10;
+
+uint256 constant a = 2;",
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "Target",
+            r"pragma solidity ^0.8.10;
+
+import {a as a1} from './A.sol';
+import {a as a2} from './B.sol';
+
+contract Foo {
+    function test() public returns(uint256 x) {
+        assembly {
+            x := mul(a1, a2)
+        }
+    }
+}",
+        )
+        .unwrap();
+
+    let result =
+        Flattener::new(project.project(), &project.compile().unwrap(), &target).unwrap().flatten();
+    assert_eq!(
+        result,
+        r"pragma solidity ^0.8.10;
+
+// src/A.sol
+
+uint256 constant a_0 = 1;
+
+// src/B.sol
+
+uint256 constant a_1 = 2;
+
+// src/Target.sol
+
+contract Foo {
+    function test() public returns(uint256 x) {
+        assembly {
+            x := mul(a_0, a_1)
+        }
+    }
+}
+"
+    );
+}
+
+#[test]
+fn can_flatten_combine_pragmas() {
+    let project = TempProject::dapptools().unwrap();
+
+    project
+        .add_source(
+            "A",
+            r"pragma solidity >=0.5.0;
+
+contract A {}",
+        )
+        .unwrap();
+
+    let target = project
+        .add_source(
+            "B",
+            r"pragma solidity <0.9.0;
+import './A.sol';
+
+contract B {}",
+        )
+        .unwrap();
+
+    test_flatteners(&project, &target, |result| {
+        assert_eq!(
+            result,
+            r"pragma solidity <0.9.0 >=0.5.0;
+
+// src/A.sol
+
+contract A {}
+
+// src/B.sol
+
+contract B {}
+"
+        );
+    });
 }
 
 #[test]
@@ -1176,6 +1999,54 @@ library MyLib {
 }
 
 #[test]
+fn can_ignore_warning_from_paths() {
+    let setup_and_compile = |ignore_paths: Option<Vec<PathBuf>>| {
+        let tmp = match ignore_paths {
+            Some(paths) => TempProject::dapptools_with_ignore_paths(paths).unwrap(),
+            None => TempProject::dapptools().unwrap(),
+        };
+
+        tmp.add_source(
+            "LinkTest",
+            r#"
+                // SPDX-License-Identifier: MIT
+                import "./MyLib.sol";
+                contract LinkTest {
+                    function foo() public returns (uint256) {
+                    }
+                }
+            "#,
+        )
+        .unwrap();
+
+        tmp.add_source(
+            "MyLib",
+            r"
+                // SPDX-License-Identifier: MIT
+                library MyLib {
+                    function foobar(uint256 a) public view returns (uint256) {
+                        return a * 100;
+                    }
+                }
+            ",
+        )
+        .unwrap();
+
+        tmp.compile().unwrap()
+    };
+
+    // Test without ignoring paths
+    let compiled_without_ignore = setup_and_compile(None);
+    compiled_without_ignore.assert_success();
+    assert!(compiled_without_ignore.has_compiler_warnings());
+
+    // Test with ignoring paths
+    let paths_to_ignore = vec![Path::new("src").to_path_buf()];
+    let compiled_with_ignore = setup_and_compile(Some(paths_to_ignore));
+    compiled_with_ignore.assert_success();
+    assert!(!compiled_with_ignore.has_compiler_warnings());
+}
+#[test]
 fn can_apply_libraries_with_remappings() {
     let mut tmp = TempProject::dapptools().unwrap();
 
@@ -1250,6 +2121,46 @@ fn can_detect_invalid_version() {
             unreachable!()
         }
     }
+}
+
+#[test]
+fn test_severity_warnings() {
+    let mut tmp = TempProject::dapptools().unwrap();
+    // also treat warnings as error
+    tmp.project_mut().compiler_severity_filter = Severity::Warning;
+
+    let content = r"
+    pragma solidity =0.8.13;
+    contract A {}
+   ";
+    tmp.add_source("A", content).unwrap();
+
+    let out = tmp.compile().unwrap();
+    assert!(out.output().has_error(&[], &[], &Severity::Warning));
+
+    let content = r"
+    // SPDX-License-Identifier: MIT OR Apache-2.0
+    pragma solidity =0.8.13;
+    contract A {}
+   ";
+    tmp.add_source("A", content).unwrap();
+
+    let out = tmp.compile().unwrap();
+    assert!(!out.output().has_error(&[], &[], &Severity::Warning));
+
+    let content = r"
+    // SPDX-License-Identifier: MIT OR Apache-2.0
+    pragma solidity =0.8.13;
+    contract A {
+      function id(uint111 value) external pure returns (uint256) {
+        return 0;
+      }
+    }
+   ";
+    tmp.add_source("A", content).unwrap();
+
+    let out = tmp.compile().unwrap();
+    assert!(out.output().has_error(&[], &[], &Severity::Warning));
 }
 
 #[test]
@@ -1532,7 +2443,7 @@ fn can_detect_contract_def_source_files() {
     let compiled = tmp.compile().unwrap();
     compiled.assert_success();
 
-    let mut sources = compiled.output().sources;
+    let mut sources = compiled.into_output().sources;
     let myfunc = sources.remove_by_path(myfunc.to_string_lossy()).unwrap();
     assert!(!myfunc.contains_contract_definition());
 
@@ -1586,7 +2497,7 @@ fn can_compile_sparse_with_link_references() {
     let mut compiled = tmp.compile_sparse(Box::<TestFileFilter>::default()).unwrap();
     compiled.assert_success();
 
-    let mut output = compiled.clone().output();
+    let mut output = compiled.clone().into_output();
 
     assert!(compiled.find_first("ATest").is_some());
     assert!(compiled.find_first("MyLib").is_some());
@@ -1841,46 +2752,68 @@ fn test_compiler_severity_filter() {
     assert!(compiled.has_compiler_errors());
 }
 
-#[test]
-fn test_compiler_severity_filter_and_ignored_error_codes() {
-    fn gen_test_data_licensing_warning() -> ProjectPathsConfig {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("test-data/test-contract-warnings/LicenseWarning.sol");
+fn gen_test_data_licensing_warning() -> ProjectPathsConfig {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("test-data/test-contract-warnings/LicenseWarning.sol");
 
-        ProjectPathsConfig::builder().sources(root).build().unwrap()
+    ProjectPathsConfig::builder().sources(root).build().unwrap()
+}
+
+fn compile_project_with_options(
+    severity_filter: Option<foundry_compilers::artifacts::Severity>,
+    ignore_paths: Option<Vec<PathBuf>>,
+    ignore_error_code: Option<u64>,
+) -> ProjectCompileOutput {
+    let mut builder =
+        Project::builder().no_artifacts().paths(gen_test_data_licensing_warning()).ephemeral();
+
+    if let Some(paths) = ignore_paths {
+        builder = builder.ignore_paths(paths);
+    }
+    if let Some(code) = ignore_error_code {
+        builder = builder.ignore_error_code(code);
+    }
+    if let Some(severity) = severity_filter {
+        builder = builder.set_compiler_severity_filter(severity);
     }
 
+    let project = builder.build().unwrap();
+    project.compile().unwrap()
+}
+
+#[test]
+fn test_compiler_ignored_file_paths() {
+    let compiled = compile_project_with_options(None, None, None);
+    // no ignored paths set, so the warning should be present
+    assert!(compiled.has_compiler_warnings());
+    compiled.assert_success();
+
+    let compiled = compile_project_with_options(
+        Some(foundry_compilers::artifacts::Severity::Warning),
+        Some(vec![PathBuf::from("test-data")]),
+        None,
+    );
+    // ignored paths set, so the warning shouldnt be present
+    assert!(!compiled.has_compiler_warnings());
+    compiled.assert_success();
+}
+
+#[test]
+fn test_compiler_severity_filter_and_ignored_error_codes() {
     let missing_license_error_code = 1878;
 
-    let project = Project::builder()
-        .no_artifacts()
-        .paths(gen_test_data_licensing_warning())
-        .ephemeral()
-        .build()
-        .unwrap();
-    let compiled = project.compile().unwrap();
+    let compiled = compile_project_with_options(None, None, None);
     assert!(compiled.has_compiler_warnings());
 
-    let project = Project::builder()
-        .no_artifacts()
-        .paths(gen_test_data_licensing_warning())
-        .ephemeral()
-        .ignore_error_code(missing_license_error_code)
-        .build()
-        .unwrap();
-    let compiled = project.compile().unwrap();
+    let compiled = compile_project_with_options(None, None, Some(missing_license_error_code));
     assert!(!compiled.has_compiler_warnings());
     compiled.assert_success();
 
-    let project = Project::builder()
-        .no_artifacts()
-        .paths(gen_test_data_licensing_warning())
-        .ephemeral()
-        .ignore_error_code(missing_license_error_code)
-        .set_compiler_severity_filter(foundry_compilers::artifacts::Severity::Warning)
-        .build()
-        .unwrap();
-    let compiled = project.compile().unwrap();
+    let compiled = compile_project_with_options(
+        Some(foundry_compilers::artifacts::Severity::Warning),
+        None,
+        Some(missing_license_error_code),
+    );
     assert!(!compiled.has_compiler_warnings());
     compiled.assert_success();
 }
@@ -1891,8 +2824,8 @@ fn remove_solc_if_exists(version: &Version) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn can_install_solc_and_compile_version() {
+#[test]
+fn can_install_solc_and_compile_version() {
     let project = TempProject::dapptools().unwrap();
     let version = Version::new(0, 8, 10);
 
@@ -2633,8 +3566,8 @@ fn can_detect_config_changes() {
     let compiled = project.compile().unwrap();
     compiled.assert_success();
 
-    let cache = SolFilesCache::read(&project.paths().cache).unwrap();
-    assert_eq!(cache.files.len(), 2);
+    let cache_before = SolFilesCache::read(&project.paths().cache).unwrap();
+    assert_eq!(cache_before.files.len(), 2);
 
     // nothing to compile
     let compiled = project.compile().unwrap();
@@ -2645,6 +3578,9 @@ fn can_detect_config_changes() {
     let compiled = project.compile().unwrap();
     compiled.assert_success();
     assert!(!compiled.is_unchanged());
+
+    let cache_after = SolFilesCache::read(&project.paths().cache).unwrap();
+    assert_ne!(cache_before, cache_after);
 }
 
 #[test]

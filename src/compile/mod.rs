@@ -12,9 +12,12 @@ use std::{
     process::{Command, Output, Stdio},
     str::FromStr,
 };
+
 pub mod many;
+
 pub mod output;
 pub use output::{contracts, info, sources};
+
 pub mod project;
 
 /// The name of the `solc` binary on the system
@@ -52,6 +55,10 @@ pub const PARIS_SOLC: Version = Version::new(0, 8, 18);
 /// <https://blog.soliditylang.org/2023/05/10/solidity-0.8.20-release-announcement/>
 pub const SHANGHAI_SOLC: Version = Version::new(0, 8, 20);
 
+/// Cancun support
+/// <https://soliditylang.org/blog/2024/01/26/solidity-0.8.24-release-announcement/>
+pub const CANCUN_SOLC: Version = Version::new(0, 8, 24);
+
 // `--base-path` was introduced in 0.6.9 <https://github.com/ethereum/solidity/releases/tag/v0.6.9>
 pub static SUPPORTS_BASE_PATH: Lazy<VersionReq> =
     Lazy::new(|| VersionReq::parse(">=0.6.9").unwrap());
@@ -60,27 +67,23 @@ pub static SUPPORTS_BASE_PATH: Lazy<VersionReq> =
 pub static SUPPORTS_INCLUDE_PATH: Lazy<VersionReq> =
     Lazy::new(|| VersionReq::parse(">=0.8.8").unwrap());
 
-#[cfg(any(test, feature = "tests"))]
-use std::sync::Mutex;
-
-#[cfg(any(test, feature = "tests"))]
-static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
 /// take the lock in tests, we use this to enforce that
 /// a test does not run while a compiler version is being installed
 ///
 /// This ensures that only one thread installs a missing `solc` exe.
 /// Instead of taking this lock in `Solc::blocking_install`, the lock should be taken before
 /// installation is detected.
-#[cfg(any(test, feature = "tests"))]
-pub(crate) fn take_solc_installer_lock() -> std::sync::MutexGuard<'static, ()> {
+#[cfg(feature = "svm-solc")]
+#[cfg(test)]
+pub(crate) fn take_solc_installer_lock() -> impl Drop {
+    static LOCK: Lazy<std::sync::Mutex<()>> = Lazy::new(|| std::sync::Mutex::new(()));
     LOCK.lock().unwrap()
 }
 
 /// A list of upstream Solc releases, used to check which version
 /// we should download.
 /// The boolean value marks whether there was an error accessing the release list
-#[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+#[cfg(feature = "svm-solc")]
 pub static RELEASES: Lazy<(svm::Releases, Vec<Version>, bool)> =
     Lazy::new(|| match serde_json::from_str::<svm::Releases>(svm_builds::RELEASE_LIST_JSON) {
         Ok(releases) => {
@@ -155,14 +158,12 @@ impl Default for Solc {
         if let Ok(solc) = std::env::var("SOLC_PATH") {
             return Solc::new(solc);
         }
-        #[cfg(not(target_arch = "wasm32"))]
+
+        if let Some(solc) = Solc::svm_global_version()
+            .and_then(|vers| Solc::find_svm_installed_version(vers.to_string()).ok())
+            .flatten()
         {
-            if let Some(solc) = Solc::svm_global_version()
-                .and_then(|vers| Solc::find_svm_installed_version(vers.to_string()).ok())
-                .flatten()
-            {
-                return solc;
-            }
+            return solc;
         }
 
         Solc::new(SOLC)
@@ -216,20 +217,16 @@ impl Solc {
     /// Returns the directory in which [svm](https://github.com/roynalnaruto/svm-rs) stores all versions
     ///
     /// This will be:
-    ///  `~/.svm` on unix, if it exists
+    /// - `~/.svm` on unix, if it exists
     /// - $XDG_DATA_HOME (~/.local/share/svm) if the svm folder does not exist.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn svm_home() -> Option<PathBuf> {
-        match home::home_dir().map(|dir| dir.join(".svm")) {
-            Some(dir) => {
-                if !dir.exists() {
-                    dirs::data_dir().map(|dir| dir.join("svm"))
-                } else {
-                    Some(dir)
-                }
+        if let Some(home_dir) = home::home_dir() {
+            let home_dot_svm = home_dir.join(".svm");
+            if home_dot_svm.exists() {
+                return Some(home_dot_svm);
             }
-            None => dirs::data_dir().map(|dir| dir.join("svm")),
         }
+        dirs::data_dir().map(|dir| dir.join("svm"))
     }
 
     /// Returns the `semver::Version` [svm](https://github.com/roynalnaruto/svm-rs)'s `.global_version` is currently set to.
@@ -237,7 +234,6 @@ impl Solc {
     ///
     /// This will read the version string (eg: "0.8.9") that the  `~/.svm/.global_version` file
     /// contains
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn svm_global_version() -> Option<Version> {
         let home = Self::svm_home()?;
         let version = std::fs::read_to_string(home.join(".global_version")).ok()?;
@@ -245,7 +241,6 @@ impl Solc {
     }
 
     /// Returns the list of all solc instances installed at `SVM_HOME`
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn installed_versions() -> Vec<SolcVersion> {
         Self::svm_home()
             .map(|home| {
@@ -260,7 +255,7 @@ impl Solc {
 
     /// Returns the list of all versions that are available to download and marking those which are
     /// already installed.
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn all_versions() -> Vec<SolcVersion> {
         let mut all_versions = Self::installed_versions();
         let mut uniques = all_versions
@@ -284,16 +279,15 @@ impl Solc {
 
     /// Returns the path for a [svm](https://github.com/roynalnaruto/svm-rs) installed version.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use foundry_compilers::Solc;
-    /// let solc = Solc::find_svm_installed_version("0.8.9").unwrap();
+    ///
+    /// let solc = Solc::find_svm_installed_version("0.8.9")?;
     /// assert_eq!(solc, Some(Solc::new("~/.svm/0.8.9/solc-0.8.9")));
-    /// # Ok(())
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn find_svm_installed_version(version: impl AsRef<str>) -> Result<Option<Self>> {
         let version = version.as_ref();
         let solc = Self::svm_home()
@@ -311,16 +305,16 @@ impl Solc {
     ///
     /// If the version is not installed yet, it will install it.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use foundry_compilers::Solc;
-    /// let solc = Solc::find_or_install_svm_version("0.8.9").unwrap();
+    ///
+    /// let solc = Solc::find_or_install_svm_version("0.8.9")?;
     /// assert_eq!(solc, Solc::new("~/.svm/0.8.9/solc-0.8.9"));
-    /// # Ok(())
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    #[cfg(all(not(target_arch = "wasm32"), feature = "svm-solc"))]
+    #[cfg(feature = "svm-solc")]
     pub fn find_or_install_svm_version(version: impl AsRef<str>) -> Result<Self> {
         let version = version.as_ref();
         if let Some(solc) = Solc::find_svm_installed_version(version)? {
@@ -344,7 +338,7 @@ impl Solc {
     /// to build it, and returns it.
     ///
     /// If the required compiler version is not installed, it also proceeds to install it.
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn detect_version(source: &Source) -> Result<Version> {
         // detects the required solc version
         let sol_version = Self::source_version_req(source)?;
@@ -355,9 +349,9 @@ impl Solc {
     /// used to build it, and returns it.
     ///
     /// If the required compiler version is not installed, it also proceeds to install it.
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn ensure_installed(sol_version: &VersionReq) -> Result<Version> {
-        #[cfg(any(test, feature = "tests"))]
+        #[cfg(test)]
         let _lock = take_solc_installer_lock();
 
         // load the local / remote versions
@@ -415,41 +409,43 @@ impl Solc {
     /// Installs the provided version of Solc in the machine under the svm dir and returns the
     /// [Solc] instance pointing to the installation.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```no_run
-    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// use foundry_compilers::{Solc, ISTANBUL_SOLC};
-    /// let solc = Solc::install(&ISTANBUL_SOLC).await.unwrap();
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let solc = Solc::install(&ISTANBUL_SOLC).await?;
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub async fn install(version: &Version) -> std::result::Result<Self, svm::SolcVmError> {
         trace!("installing solc version \"{}\"", version);
         crate::report::solc_installation_start(version);
-        let result = svm::install(version).await;
-        crate::report::solc_installation_success(version);
-        result.map(Solc::new)
+        match svm::install(version).await {
+            Ok(path) => {
+                crate::report::solc_installation_success(version);
+                Ok(Solc::new(path))
+            }
+            Err(err) => {
+                crate::report::solc_installation_error(version, &err.to_string());
+                Err(err)
+            }
+        }
     }
 
     /// Blocking version of `Self::install`
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn blocking_install(version: &Version) -> std::result::Result<Self, svm::SolcVmError> {
         use crate::utils::RuntimeOrHandle;
 
         trace!("blocking installing solc version \"{}\"", version);
         crate::report::solc_installation_start(version);
-        // the async version `svm::install` is used instead of `svm::blocking_intsall`
+        // The async version `svm::install` is used instead of `svm::blocking_intsall`
         // because the underlying `reqwest::blocking::Client` does not behave well
-        // in tokio rt. see https://github.com/seanmonstar/reqwest/issues/1017
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                let installation = svm::blocking_install(version);
-            } else {
-                let installation = RuntimeOrHandle::new().block_on(svm::install(version));
-            }
-        };
-        match installation {
+        // inside of a Tokio runtime. See: https://github.com/seanmonstar/reqwest/issues/1017
+        match RuntimeOrHandle::new().block_on(svm::install(version)) {
             Ok(path) => {
                 crate::report::solc_installation_success(version);
                 Ok(Solc::new(path))
@@ -463,7 +459,7 @@ impl Solc {
 
     /// Verify that the checksum for this version of solc is correct. We check against the SHA256
     /// checksum from the build information published by [binaries.soliditylang.org](https://binaries.soliditylang.org/)
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn verify_checksum(&self) -> Result<()> {
         let version = self.version_short()?;
         let mut version_path = svm::version_path(version.to_string().as_str());
@@ -501,9 +497,10 @@ impl Solc {
         if checksum_calc == checksum_found {
             Ok(())
         } else {
+            use alloy_primitives::hex;
             let expected = hex::encode(checksum_found);
             let detected = hex::encode(checksum_calc);
-            warn!(target : "solc", "checksum mismatch for {:?}, expected {}, but found {} for file {:?}", version, expected, detected, version_path);
+            warn!(target: "solc", "checksum mismatch for {:?}, expected {}, but found {} for file {:?}", version, expected, detected, version_path);
             Err(SolcError::ChecksumMismatch { version, expected, detected, file: version_path })
         }
     }
@@ -525,16 +522,15 @@ impl Solc {
     /// In other words, this removes those files from the `CompilerOutput` that are __not__ included
     /// in the provided `CompilerInput`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use foundry_compilers::{CompilerInput, Solc};
+    ///
     /// let solc = Solc::default();
     /// let input = CompilerInput::new("./contracts")?[0].clone();
     /// let output = solc.compile_exact(&input)?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile_exact(&self, input: &CompilerInput) -> Result<CompilerOutput> {
         let mut out = self.compile(input)?;
@@ -542,66 +538,81 @@ impl Solc {
         Ok(out)
     }
 
-    /// Run `solc --stand-json` and return the `solc`'s output as
-    /// `CompilerOutput`
+    /// Compiles with `--standard-json` and deserializes the output as [`CompilerOutput`].
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use foundry_compilers::{CompilerInput, Solc};
+    ///
     /// let solc = Solc::default();
     /// let input = CompilerInput::new("./contracts")?;
     /// let output = solc.compile(&input)?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile<T: Serialize>(&self, input: &T) -> Result<CompilerOutput> {
         self.compile_as(input)
     }
 
-    /// Run `solc --stand-json` and return the `solc`'s output as the given json
-    /// output
+    /// Compiles with `--standard-json` and deserializes the output as the given `D`.
     pub fn compile_as<T: Serialize, D: DeserializeOwned>(&self, input: &T) -> Result<D> {
         let output = self.compile_output(input)?;
-        Ok(serde_json::from_slice(&output)?)
+
+        // Only run UTF-8 validation once.
+        let output = std::str::from_utf8(&output).map_err(|_| SolcError::InvalidUtf8)?;
+
+        Ok(serde_json::from_str(output)?)
     }
 
+    /// Compiles with `--standard-json` and returns the raw `stdout` output.
+    #[instrument(name = "compile", level = "debug", skip_all)]
     pub fn compile_output<T: Serialize>(&self, input: &T) -> Result<Vec<u8>> {
         let mut cmd = Command::new(&self.solc);
-        if let Some(ref base_path) = self.base_path {
+        if let Some(base_path) = &self.base_path {
             cmd.current_dir(base_path);
             cmd.arg("--base-path").arg(base_path);
         }
-        let mut child = cmd
-            .args(&self.args)
-            .arg("--standard-json")
-            .stdin(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(|err| SolcError::io(err, &self.solc))?;
-        let stdin = child.stdin.take().expect("Stdin exists.");
+        cmd.args(&self.args).arg("--standard-json");
+        cmd.stdin(Stdio::piped()).stderr(Stdio::piped()).stdout(Stdio::piped());
+
+        trace!(input=%serde_json::to_string(input).unwrap_or_else(|e| e.to_string()));
+        debug!(?cmd, "compiling");
+
+        let mut child = cmd.spawn().map_err(self.map_io_err())?;
+        debug!("spawned");
+
+        let stdin = child.stdin.as_mut().unwrap();
         serde_json::to_writer(stdin, input)?;
-        compile_output(child.wait_with_output().map_err(|err| SolcError::io(err, &self.solc))?)
+        debug!("wrote JSON input to stdin");
+
+        let output = child.wait_with_output().map_err(self.map_io_err())?;
+        debug!(%output.status, output.stderr = ?String::from_utf8_lossy(&output.stderr), "finished");
+
+        compile_output(output)
     }
 
+    /// Invokes `solc --version` and parses the output as a SemVer [`Version`], stripping the
+    /// pre-release and build metadata.
     pub fn version_short(&self) -> Result<Version> {
         let version = self.version()?;
         Ok(Version::new(version.major, version.minor, version.patch))
     }
 
-    /// Returns the version from the configured `solc`
+    /// Invokes `solc --version` and parses the output as a SemVer [`Version`].
+    #[instrument(level = "debug", skip_all)]
     pub fn version(&self) -> Result<Version> {
-        version_from_output(
-            Command::new(&self.solc)
-                .arg("--version")
-                .stdin(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .output()
-                .map_err(|err| SolcError::io(err, &self.solc))?,
-        )
+        let mut cmd = Command::new(&self.solc);
+        cmd.arg("--version").stdin(Stdio::piped()).stderr(Stdio::piped()).stdout(Stdio::piped());
+        debug!(?cmd, "getting Solc version");
+        let output = cmd.output().map_err(self.map_io_err())?;
+        trace!(?output);
+        let version = version_from_output(output)?;
+        debug!(%version);
+        Ok(version)
+    }
+
+    fn map_io_err(&self) -> impl FnOnce(std::io::Error) -> SolcError + '_ {
+        move |err| SolcError::io(err, &self.solc)
     }
 }
 
@@ -643,28 +654,21 @@ impl Solc {
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .map_err(|err| SolcError::io(err, &self.solc))?;
+            .map_err(self.map_io_err())?;
         let stdin = child.stdin.as_mut().unwrap();
-        stdin.write_all(&content).await.map_err(|err| SolcError::io(err, &self.solc))?;
-        stdin.flush().await.map_err(|err| SolcError::io(err, &self.solc))?;
-        compile_output(
-            child.wait_with_output().await.map_err(|err| SolcError::io(err, &self.solc))?,
-        )
+        stdin.write_all(&content).await.map_err(self.map_io_err())?;
+        stdin.flush().await.map_err(self.map_io_err())?;
+        compile_output(child.wait_with_output().await.map_err(self.map_io_err())?)
     }
 
     pub async fn async_version(&self) -> Result<Version> {
-        version_from_output(
-            tokio::process::Command::new(&self.solc)
-                .arg("--version")
-                .stdin(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .map_err(|err| SolcError::io(err, &self.solc))?
-                .wait_with_output()
-                .await
-                .map_err(|err| SolcError::io(err, &self.solc))?,
-        )
+        let mut cmd = tokio::process::Command::new(&self.solc);
+        cmd.arg("--version").stdin(Stdio::piped()).stderr(Stdio::piped()).stdout(Stdio::piped());
+        debug!(?cmd, "getting version");
+        let output = cmd.output().await.map_err(self.map_io_err())?;
+        let version = version_from_output(output)?;
+        debug!(%version);
+        Ok(version)
     }
 
     /// Compiles all `CompilerInput`s with their associated `Solc`.
@@ -673,20 +677,21 @@ impl Solc {
     /// order in which they complete. No more than `n` futures will be buffered at any point in
     /// time, and less than `n` may also be buffered depending on the state of each future.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// Compile 2 `CompilerInput`s at once
     ///
     /// ```no_run
-    /// # async fn example() {
     /// use foundry_compilers::{CompilerInput, Solc};
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let solc1 = Solc::default();
     /// let solc2 = Solc::default();
-    /// let input1 = CompilerInput::new("contracts").unwrap()[0].clone();
-    /// let input2 = CompilerInput::new("src").unwrap()[0].clone();
+    /// let input1 = CompilerInput::new("contracts")?[0].clone();
+    /// let input2 = CompilerInput::new("src")?[0].clone();
     ///
-    /// let outputs =
-    ///     Solc::compile_many([(solc1, input1), (solc2, input2)], 2).await.flattened().unwrap();
+    /// let outputs = Solc::compile_many([(solc1, input1), (solc2, input2)], 2).await.flattened()?;
+    /// # Ok(())
     /// # }
     /// ```
     pub async fn compile_many<I>(jobs: I, n: usize) -> crate::many::CompiledMany
@@ -745,7 +750,7 @@ impl<T: Into<PathBuf>> From<T> for Solc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Artifact, CompilerInput};
+    use crate::Artifact;
 
     #[test]
     fn test_version_parse() {
@@ -859,8 +864,7 @@ mod tests {
     }
 
     #[test]
-    // This test might be a bit hard to maintain
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     fn test_detect_version() {
         for (pragma, expected) in [
             // pinned
@@ -873,7 +877,7 @@ mod tests {
             (">=0.4.0 <0.5.0", "0.4.26"),
             // latest - this has to be updated every time a new version is released.
             // Requires the SVM version list to be updated as well.
-            (">=0.5.0", "0.8.23"),
+            (">=0.5.0", "0.8.24"),
         ] {
             let source = source(pragma);
             let res = Solc::detect_version(&source).unwrap();
@@ -884,9 +888,8 @@ mod tests {
     #[test]
     #[cfg(feature = "full")]
     fn test_find_installed_version_path() {
-        // this test does not take the lock by default, so we need to manually
-        // add it here.
-        let _lock = LOCK.lock();
+        // This test does not take the lock by default, so we need to manually add it here.
+        let _lock = take_solc_installer_lock();
         let ver = "0.8.6";
         let version = Version::from_str(ver).unwrap();
         if utils::installed_versions(svm::SVM_DATA_DIR.as_path())
@@ -901,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     fn can_install_solc_in_tokio_rt() {
         let version = Version::from_str("0.8.6").unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();

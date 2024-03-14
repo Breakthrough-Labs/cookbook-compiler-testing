@@ -1,6 +1,7 @@
 //! Utility functions
 
 use crate::{error::SolcError, SolcIoError};
+use alloy_primitives::{hex, keccak256};
 use cfg_if::cfg_if;
 use once_cell::sync::Lazy;
 use regex::{Match, Regex};
@@ -13,7 +14,6 @@ use std::{
     ops::Range,
     path::{Component, Path, PathBuf},
 };
-use tiny_keccak::{Hasher, Keccak};
 use walkdir::WalkDir;
 
 /// A regex that matches the import path and identifier of a solidity import
@@ -59,7 +59,7 @@ pub fn range_by_offset(range: &Range<usize>, offset: isize) -> Range<usize> {
 /// `import "./contracts/Contract.sol";` -> `"./contracts/Contract.sol"`.
 ///
 /// See also <https://docs.soliditylang.org/en/v0.8.9/grammar.html>
-pub fn find_import_paths(contract: &str) -> impl Iterator<Item = Match> {
+pub fn find_import_paths(contract: &str) -> impl Iterator<Item = Match<'_>> {
     RE_SOL_IMPORT.captures_iter(contract).filter_map(|cap| {
         cap.name("p1")
             .or_else(|| cap.name("p2"))
@@ -70,7 +70,7 @@ pub fn find_import_paths(contract: &str) -> impl Iterator<Item = Match> {
 
 /// Returns the solidity version pragma from the given input:
 /// `pragma solidity ^0.5.2;` => `^0.5.2`
-pub fn find_version_pragma(contract: &str) -> Option<Match> {
+pub fn find_version_pragma(contract: &str) -> Option<Match<'_>> {
     RE_SOL_PRAGMA_VERSION.captures(contract)?.name("version")
 }
 
@@ -97,7 +97,7 @@ pub fn source_files_iter(root: impl AsRef<Path>) -> impl Iterator<Item = PathBuf
 ///
 /// NOTE: this does not resolve imports from other locations
 ///
-/// # Example
+/// # Examples
 ///
 /// ```no_run
 /// use foundry_compilers::utils;
@@ -110,7 +110,7 @@ pub fn source_files(root: impl AsRef<Path>) -> Vec<PathBuf> {
 /// Returns a list of _unique_ paths to all folders under `root` that contain at least one solidity
 /// file (`*.sol`).
 ///
-/// # Example
+/// # Examples
 ///
 /// ```no_run
 /// use foundry_compilers::utils;
@@ -372,28 +372,23 @@ pub fn library_hash_placeholder(name: impl AsRef<[u8]>) -> String {
 ///
 /// See also <https://docs.soliditylang.org/en/develop/using-the-compiler.html#library-linking>
 pub fn library_hash(name: impl AsRef<[u8]>) -> [u8; 17] {
-    let mut output = [0u8; 17];
-    let mut hasher = Keccak::v256();
-    hasher.update(name.as_ref());
-    hasher.finalize(&mut output);
-    output
+    let hash = keccak256(name);
+    hash[..17].try_into().unwrap()
 }
 
 /// Find the common ancestor, if any, between the given paths
 ///
-/// # Example
+/// # Examples
 ///
-/// ```rust
+/// ```
+/// use foundry_compilers::utils::common_ancestor_all;
 /// use std::path::{Path, PathBuf};
 ///
-/// # fn main() {
-/// use foundry_compilers::utils::common_ancestor_all;
 /// let baz = Path::new("/foo/bar/baz");
 /// let bar = Path::new("/foo/bar/bar");
 /// let foo = Path::new("/foo/bar/foo");
-/// let common = common_ancestor_all(vec![baz, bar, foo]).unwrap();
+/// let common = common_ancestor_all([baz, bar, foo]).unwrap();
 /// assert_eq!(common, Path::new("/foo/bar").to_path_buf());
-/// # }
 /// ```
 pub fn common_ancestor_all<I, P>(paths: I) -> Option<PathBuf>
 where
@@ -414,18 +409,16 @@ where
 
 /// Finds the common ancestor of both paths
 ///
-/// # Example
+/// # Examples
 ///
-/// ```rust
+/// ```
+/// use foundry_compilers::utils::common_ancestor;
 /// use std::path::{Path, PathBuf};
 ///
-/// # fn main() {
-/// use foundry_compilers::utils::common_ancestor;
 /// let foo = Path::new("/foo/bar/foo");
 /// let bar = Path::new("/foo/bar/bar");
 /// let ancestor = common_ancestor(foo, bar).unwrap();
 /// assert_eq!(ancestor, Path::new("/foo/bar").to_path_buf());
-/// # }
 /// ```
 pub fn common_ancestor(a: impl AsRef<Path>, b: impl AsRef<Path>) -> Option<PathBuf> {
     let a = a.as_ref().components();
@@ -483,36 +476,36 @@ pub(crate) fn find_case_sensitive_existing_file(non_existing: &Path) -> Option<P
         })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::runtime::{Handle, Runtime};
+cfg_if! {
+    if #[cfg(any(feature = "async", feature = "svm-solc"))] {
+        use tokio::runtime::{Handle, Runtime};
 
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
-pub enum RuntimeOrHandle {
-    Runtime(Runtime),
-    Handle(Handle),
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Default for RuntimeOrHandle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl RuntimeOrHandle {
-    pub fn new() -> RuntimeOrHandle {
-        match Handle::try_current() {
-            Ok(handle) => RuntimeOrHandle::Handle(handle),
-            Err(_) => RuntimeOrHandle::Runtime(Runtime::new().expect("Failed to start runtime")),
+        #[derive(Debug)]
+        pub enum RuntimeOrHandle {
+            Runtime(Runtime),
+            Handle(Handle),
         }
-    }
 
-    pub fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {
-        match &self {
-            RuntimeOrHandle::Runtime(runtime) => runtime.block_on(f),
-            RuntimeOrHandle::Handle(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
+        impl Default for RuntimeOrHandle {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl RuntimeOrHandle {
+            pub fn new() -> RuntimeOrHandle {
+                match Handle::try_current() {
+                    Ok(handle) => RuntimeOrHandle::Handle(handle),
+                    Err(_) => RuntimeOrHandle::Runtime(Runtime::new().expect("Failed to start runtime")),
+                }
+            }
+
+            pub fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {
+                match &self {
+                    RuntimeOrHandle::Runtime(runtime) => runtime.block_on(f),
+                    RuntimeOrHandle::Handle(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
+                }
+            }
         }
     }
 }
@@ -565,13 +558,8 @@ pub fn create_parent_dir_all(file: impl AsRef<Path>) -> Result<(), SolcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use solang_parser::pt::SourceUnitPart;
-    use std::{
-        collections::HashSet,
-        fs::{create_dir_all, File},
-    };
-    use tempdir;
+    use std::fs::{create_dir_all, File};
 
     #[test]
     fn can_find_different_case() {

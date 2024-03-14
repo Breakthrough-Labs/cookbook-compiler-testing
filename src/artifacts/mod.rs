@@ -3,8 +3,10 @@
 #![allow(ambiguous_glob_reexports)]
 
 use crate::{
-    compile::*, error::SolcIoError, remappings::Remapping, utils, ProjectPathsConfig, SolcError,
+    compile::*, error::SolcIoError, output::ErrorFilter, remappings::Remapping, utils,
+    ProjectPathsConfig, SolcError,
 };
+use alloy_primitives::hex;
 use md5::Digest;
 use semver::Version;
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
@@ -452,20 +454,20 @@ impl Settings {
             .insert(key.into(), values.into_iter().map(|s| s.to_string()).collect());
     }
 
-    /// Sets the ``viaIR` valu
+    /// Sets the `viaIR` value.
     #[must_use]
     pub fn set_via_ir(mut self, via_ir: bool) -> Self {
         self.via_ir = Some(via_ir);
         self
     }
 
-    /// Enables `viaIR`
+    /// Enables `viaIR`.
     #[must_use]
     pub fn with_via_ir(self) -> Self {
         self.set_via_ir(true)
     }
 
-    /// Enable `viaIR` and use the minimum optimization settings
+    /// Enable `viaIR` and use the minimum optimization settings.
     ///
     /// This is useful in the following scenarios:
     /// - When compiling for test coverage, this can resolve the "stack too deep" error while still
@@ -574,7 +576,7 @@ impl Default for Settings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Libraries {
-    /// All libraries, `(file path -> (Lib name -> Address))
+    /// All libraries, `(file path -> (Lib name -> Address))`.
     pub libs: BTreeMap<PathBuf, BTreeMap<String, String>>,
 }
 
@@ -584,14 +586,15 @@ impl Libraries {
     /// Parses all libraries in the form of
     /// `<file>:<lib>:<addr>`
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use foundry_compilers::artifacts::Libraries;
+    ///
     /// let libs = Libraries::parse(&[
     ///     "src/DssSpell.sol:DssExecLib:0xfD88CeE74f7D78697775aBDAE53f9Da1559728E4".to_string(),
-    /// ])
-    /// .unwrap();
+    /// ])?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn parse(libs: &[String]) -> Result<Self, SolcError> {
         let mut libraries = BTreeMap::default();
@@ -641,6 +644,18 @@ impl Libraries {
                 });
                 (file, target)
             })
+            .collect();
+        self
+    }
+
+    /// Strips the given prefix from all library file paths to make them relative to the given
+    /// `base` argument
+    pub fn with_stripped_file_prefixes(mut self, base: impl AsRef<Path>) -> Self {
+        let base = base.as_ref();
+        self.libs = self
+            .libs
+            .into_iter()
+            .map(|(f, l)| (utils::source_name(&f, base).to_path_buf(), l))
             .collect();
         self
     }
@@ -779,6 +794,13 @@ impl YulDetails {
 /// EVM versions.
 ///
 /// Kept in sync with: <https://github.com/ethereum/solidity/blob/develop/liblangutil/EVMVersion.h>
+// When adding new EVM versions (see a previous attempt at https://github.com/foundry-rs/compilers/pull/51):
+// - add the version to the end of the enum
+// - update the default variant to `m_version` default: https://github.com/ethereum/solidity/blob/develop/liblangutil/EVMVersion.h#L122
+// - create a constant for the Solc version that introduced it in `../compile/mod.rs`
+// - add the version to the top of `normalize_version` and wherever else the compiler complains
+// - update `FromStr` impl
+// - write a test case in `test_evm_version_normalization` at the bottom of this file
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EvmVersion {
     Homestead,
@@ -793,6 +815,7 @@ pub enum EvmVersion {
     Paris,
     #[default]
     Shanghai,
+    Cancun,
 }
 
 impl EvmVersion {
@@ -800,10 +823,12 @@ impl EvmVersion {
     pub fn normalize_version(self, version: &Version) -> Option<Self> {
         // The EVM version flag was only added in 0.4.21; we work our way backwards
         if *version >= BYZANTIUM_SOLC {
-            // If the Solc version is at least at Shanghai, it supports all EVM versions.
+            // If the Solc version is the latest, it supports all EVM versions.
             // For all other cases, cap at the at-the-time highest possible fork.
-            let normalized = if *version >= SHANGHAI_SOLC {
+            let normalized = if *version >= CANCUN_SOLC {
                 self
+            } else if self >= Self::Shanghai && *version >= SHANGHAI_SOLC {
+                Self::Shanghai
             } else if self >= Self::Paris && *version >= PARIS_SOLC {
                 Self::Paris
             } else if self >= Self::London && *version >= LONDON_SOLC {
@@ -841,6 +866,7 @@ impl EvmVersion {
             Self::London => "london",
             Self::Paris => "paris",
             Self::Shanghai => "shanghai",
+            Self::Cancun => "cancun",
         }
     }
 
@@ -908,6 +934,7 @@ impl FromStr for EvmVersion {
             "london" => Ok(Self::London),
             "paris" => Ok(Self::Paris),
             "shanghai" => Ok(Self::Shanghai),
+            "cancun" => Ok(Self::Cancun),
             s => Err(format!("Unknown evm version: {s}")),
         }
     }
@@ -923,7 +950,7 @@ pub struct DebuggingSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub revert_strings: Option<RevertStrings>,
-    ///How much extra debug information to include in comments in the produced EVM assembly and
+    /// How much extra debug information to include in comments in the produced EVM assembly and
     /// Yul code.
     /// Available components are:
     // - `location`: Annotations of the form `@src <index>:<start>:<end>` indicating the location of
@@ -976,7 +1003,7 @@ impl FromStr for RevertStrings {
             "strip" => Ok(RevertStrings::Strip),
             "debug" => Ok(RevertStrings::Debug),
             "verboseDebug" | "verbosedebug" => Ok(RevertStrings::VerboseDebug),
-            s => Err(format!("Unknown evm version: {s}")),
+            s => Err(format!("Unknown revert string mode: {s}")),
         }
     }
 }
@@ -1428,9 +1455,12 @@ impl Source {
     }
 
     /// Reads the file's content
+    #[instrument(level = "debug", skip_all, err)]
     pub fn read(file: impl AsRef<Path>) -> Result<Self, SolcIoError> {
         let file = file.as_ref();
-        Ok(Self::new(fs::read_to_string(file).map_err(|err| SolcIoError::new(err, file))?))
+        trace!(file=%file.display());
+        let content = fs::read_to_string(file).map_err(|err| SolcIoError::new(err, file))?;
+        Ok(Self::new(content))
     }
 
     /// Recursively finds all source files under the given dir path and reads them all
@@ -1553,19 +1583,31 @@ impl CompilerOutput {
         self.errors.iter().any(|err| err.severity.is_error())
     }
 
-    /// Whether the output contains a compiler warning
-    pub fn has_warning(&self, ignored_error_codes: &[u64]) -> bool {
-        self.errors.iter().any(|err| {
-            if err.severity.is_warning() {
-                err.error_code.as_ref().map_or(false, |code| !ignored_error_codes.contains(code))
-            } else {
-                false
+    /// Checks if there are any compiler warnings that are not ignored by the specified error codes
+    /// and file paths.
+    pub fn has_warning<'a>(&self, filter: impl Into<ErrorFilter<'a>>) -> bool {
+        let filter: ErrorFilter<'_> = filter.into();
+        self.errors.iter().any(|error| {
+            if !error.severity.is_warning() {
+                return false;
             }
+
+            let is_code_ignored = filter.is_code_ignored(error.error_code);
+
+            let is_file_ignored = error
+                .source_location
+                .as_ref()
+                .map_or(false, |location| filter.is_file_ignored(Path::new(&location.file)));
+
+            // Only consider warnings that are not ignored by either code or file path.
+            // Hence, return `true` for warnings that are not ignored, making the function
+            // return `true` if any such warnings exist.
+            !(is_code_ignored || is_file_ignored)
         })
     }
 
     /// Finds the _first_ contract with the given name
-    pub fn find(&self, contract: impl AsRef<str>) -> Option<CompactContractRef> {
+    pub fn find(&self, contract: impl AsRef<str>) -> Option<CompactContractRef<'_>> {
         let contract_name = contract.as_ref();
         self.contracts_iter().find_map(|(name, contract)| {
             (name == contract_name).then(|| CompactContractRef::from(contract))
@@ -1590,7 +1632,7 @@ impl CompilerOutput {
 
     /// Given the contract file's path and the contract's name, tries to return the contract's
     /// bytecode, runtime bytecode, and abi
-    pub fn get(&self, path: &str, contract: &str) -> Option<CompactContractRef> {
+    pub fn get(&self, path: &str, contract: &str) -> Option<CompactContractRef<'_>> {
         self.contracts
             .get(path)
             .and_then(|contracts| contracts.get(contract))
@@ -1640,7 +1682,7 @@ impl OutputContracts {
     }
 
     /// Finds the _first_ contract with the given name
-    pub fn find(&self, contract: impl AsRef<str>) -> Option<CompactContractRef> {
+    pub fn find(&self, contract: impl AsRef<str>) -> Option<CompactContractRef<'_>> {
         let contract_name = contract.as_ref();
         self.contracts_iter().find_map(|(name, contract)| {
             (name == contract_name).then(|| CompactContractRef::from(contract))
@@ -1907,34 +1949,17 @@ impl SourceFile {
     }
 }
 
-/// A wrapper type for a list of source files
-/// `path -> SourceFile`
+/// A wrapper type for a list of source files: `path -> SourceFile`.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct SourceFiles(pub BTreeMap<String, SourceFile>);
 
 impl SourceFiles {
-    /// Returns an iterator over the source files' ids and path
-    ///
-    /// ```
-    /// use foundry_compilers::artifacts::SourceFiles;
-    /// use std::collections::BTreeMap;
-    /// # fn demo(files: SourceFiles) {
-    /// let sources: BTreeMap<u32, String> = files.into_ids().collect();
-    /// # }
-    /// ```
+    /// Returns an iterator over the source files' IDs and path.
     pub fn into_ids(self) -> impl Iterator<Item = (u32, String)> {
         self.0.into_iter().map(|(k, v)| (v.id, k))
     }
 
-    /// Returns an iterator over the source files' paths and ids
-    ///
-    /// ```
-    /// use foundry_compilers::artifacts::SourceFiles;
-    /// use std::collections::BTreeMap;
-    /// # fn demo(files: SourceFiles) {
-    /// let sources: BTreeMap<String, u32> = files.into_paths().collect();
-    /// # }
-    /// ```
+    /// Returns an iterator over the source files' paths and IDs.
     pub fn into_paths(self) -> impl Iterator<Item = (String, u32)> {
         self.0.into_iter().map(|(k, v)| (k, v.id))
     }
@@ -1945,7 +1970,6 @@ mod tests {
     use super::*;
     use crate::AggregatedCompilerOutput;
     use alloy_primitives::Address;
-    use std::{fs, path::PathBuf};
 
     #[test]
     fn can_parse_declaration_error() {
@@ -2074,7 +2098,7 @@ mod tests {
 
     #[test]
     fn test_evm_version_normalization() {
-        for (solc_version, evm_version, expected) in &[
+        for &(solc_version, evm_version, expected) in &[
             // Everything before 0.4.21 should always return None
             ("0.4.20", EvmVersion::Homestead, None),
             // Byzantium clipping
@@ -2109,10 +2133,15 @@ mod tests {
             ("0.8.20", EvmVersion::Homestead, Some(EvmVersion::Homestead)),
             ("0.8.20", EvmVersion::Paris, Some(EvmVersion::Paris)),
             ("0.8.20", EvmVersion::Shanghai, Some(EvmVersion::Shanghai)),
+            ("0.8.20", EvmVersion::Cancun, Some(EvmVersion::Shanghai)),
+            // Cancun
+            ("0.8.24", EvmVersion::Homestead, Some(EvmVersion::Homestead)),
+            ("0.8.24", EvmVersion::Shanghai, Some(EvmVersion::Shanghai)),
+            ("0.8.24", EvmVersion::Cancun, Some(EvmVersion::Cancun)),
         ] {
             let version = Version::from_str(solc_version).unwrap();
             assert_eq!(
-                &evm_version.normalize_version(&version),
+                evm_version.normalize_version(&version),
                 expected,
                 "({version}, {evm_version:?})"
             )
@@ -2173,6 +2202,63 @@ mod tests {
                 PathBuf::from("./src/lib/LibraryContract.sol"),
                 BTreeMap::from([("Library".to_string(), "0xaddress".to_string())])
             )])
+        );
+    }
+
+    #[test]
+    fn can_strip_libraries_path_prefixes() {
+        let libraries= [
+            "/global/root/src/FileInSrc.sol:Chainlink:0xffedba5e171c4f15abaaabc86e8bd01f9b54dae5".to_string(),
+            "src/deep/DeepFileInSrc.sol:ChainlinkTWAP:0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string(),
+            "/global/GlobalFile.sol:Math:0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string(),
+            "/global/root/test/ChainlinkTWAP.t.sol:ChainlinkTWAP:0xffedba5e171c4f15abaaabc86e8bd01f9b54dae5".to_string(),
+            "test/SizeAuctionDiscount.sol:Math:0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string(),
+        ];
+
+        let libs = Libraries::parse(&libraries[..])
+            .unwrap()
+            .with_stripped_file_prefixes("/global/root")
+            .libs;
+
+        pretty_assertions::assert_eq!(
+            libs,
+            BTreeMap::from([
+                (
+                    PathBuf::from("/global/GlobalFile.sol"),
+                    BTreeMap::from([(
+                        "Math".to_string(),
+                        "0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string()
+                    )])
+                ),
+                (
+                    PathBuf::from("src/FileInSrc.sol"),
+                    BTreeMap::from([(
+                        "Chainlink".to_string(),
+                        "0xffedba5e171c4f15abaaabc86e8bd01f9b54dae5".to_string()
+                    )])
+                ),
+                (
+                    PathBuf::from("src/deep/DeepFileInSrc.sol"),
+                    BTreeMap::from([(
+                        "ChainlinkTWAP".to_string(),
+                        "0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string()
+                    )])
+                ),
+                (
+                    PathBuf::from("test/SizeAuctionDiscount.sol"),
+                    BTreeMap::from([(
+                        "Math".to_string(),
+                        "0x902f6cf364b8d9470d5793a9b2b2e86bddd21e0c".to_string()
+                    )])
+                ),
+                (
+                    PathBuf::from("test/ChainlinkTWAP.t.sol"),
+                    BTreeMap::from([(
+                        "ChainlinkTWAP".to_string(),
+                        "0xffedba5e171c4f15abaaabc86e8bd01f9b54dae5".to_string()
+                    )])
+                ),
+            ])
         );
     }
 

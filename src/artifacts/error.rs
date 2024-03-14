@@ -18,14 +18,18 @@ pub struct SecondarySourceLocation {
     pub message: Option<String>,
 }
 
+/// The severity of the error.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// Solc `Error`
     #[default]
     Error,
+    /// Solc `Warning`
     Warning,
+    /// Solc `Info`
     Info,
 }
 
@@ -121,39 +125,52 @@ impl Error {
 /// <https://github.com/ethereum/solidity/blob/a297a687261a1c634551b1dac0e36d4573c19afe/liblangutil/SourceReferenceFormatter.cpp#L105>
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !Paint::is_enabled() {
-            let msg = self.formatted_message.as_ref().unwrap_or(&self.message);
-            self.fmt_severity(f)?;
-            f.write_str(": ")?;
-            return f.write_str(msg);
+        let mut short_msg = self.message.trim();
+        let fmtd_msg = self.formatted_message.as_deref().unwrap_or("");
+
+        if short_msg.is_empty() {
+            // if the message is empty, try to extract the first line from the formatted message
+            if let Some(first_line) = fmtd_msg.lines().next() {
+                // this is something like `ParserError: <short_message>`
+                if let Some((_, s)) = first_line.split_once(':') {
+                    short_msg = s.trim_start();
+                } else {
+                    short_msg = first_line;
+                }
+            }
         }
 
         // Error (XXXX): Error Message
         styled(f, self.severity.color().style().bold(), |f| self.fmt_severity(f))?;
-        fmt_msg(f, &self.message)?;
+        fmt_msg(f, short_msg)?;
 
-        if let Some(msg) = &self.formatted_message {
-            let mut lines = msg.lines();
+        let mut lines = fmtd_msg.lines();
 
-            // skip first line, it should be similar to the error message we wrote above
-            lines.next();
+        // skip the first line if it contains the same message as the one we just formatted,
+        // unless it also contains a source location, in which case the entire error message is an
+        // old style error message, like:
+        //     path/to/file:line:column: ErrorType: message
+        if lines.clone().next().map_or(false, |l| {
+            l.contains(short_msg) && l.bytes().filter(|b| *b == b':').count() < 3
+        }) {
+            let _ = lines.next();
+        }
 
-            // format the main source location
-            fmt_source_location(f, &mut lines)?;
+        // format the main source location
+        fmt_source_location(f, &mut lines)?;
 
-            // format remaining lines as secondary locations
-            while let Some(line) = lines.next() {
-                f.write_str("\n")?;
+        // format remaining lines as secondary locations
+        while let Some(line) = lines.next() {
+            f.write_str("\n")?;
 
-                if let Some((note, msg)) = line.split_once(':') {
-                    styled(f, Self::secondary_style(), |f| f.write_str(note))?;
-                    fmt_msg(f, msg)?;
-                } else {
-                    f.write_str(line)?;
-                }
-
-                fmt_source_location(f, &mut lines)?;
+            if let Some((note, msg)) = line.split_once(':') {
+                styled(f, Self::secondary_style(), |f| f.write_str(note))?;
+                fmt_msg(f, msg)?;
+            } else {
+                f.write_str(line)?;
             }
+
+            fmt_source_location(f, &mut lines)?;
         }
 
         Ok(())
@@ -196,7 +213,7 @@ impl Error {
     /// ```text
     /// Error (XXXX)
     /// ```
-    fn fmt_severity(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt_severity(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.severity.as_str())?;
         if let Some(code) = self.error_code {
             write!(f, " ({code})")?;
@@ -206,17 +223,23 @@ impl Error {
 }
 
 /// Calls `fun` in between [`Style::fmt_prefix`] and [`Style::fmt_suffix`].
-fn styled<F>(f: &mut fmt::Formatter, style: Style, fun: F) -> fmt::Result
+fn styled<F>(f: &mut fmt::Formatter<'_>, style: Style, fun: F) -> fmt::Result
 where
-    F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+    F: FnOnce(&mut fmt::Formatter<'_>) -> fmt::Result,
 {
-    style.fmt_prefix(f)?;
+    let enabled = Paint::is_enabled();
+    if enabled {
+        style.fmt_prefix(f)?;
+    }
     fun(f)?;
-    style.fmt_suffix(f)
+    if enabled {
+        style.fmt_suffix(f)?;
+    }
+    Ok(())
 }
 
 /// Formats the diagnostic message.
-fn fmt_msg(f: &mut fmt::Formatter, msg: &str) -> fmt::Result {
+fn fmt_msg(f: &mut fmt::Formatter<'_>, msg: &str) -> fmt::Result {
     styled(f, Error::message_style(), |f| {
         f.write_str(": ")?;
         f.write_str(msg.trim_start())
@@ -231,7 +254,7 @@ fn fmt_msg(f: &mut fmt::Formatter, msg: &str) -> fmt::Result {
 /// 420 |       bad_code()
 ///     |                ^
 /// ```
-fn fmt_source_location(f: &mut fmt::Formatter, lines: &mut std::str::Lines) -> fmt::Result {
+fn fmt_source_location(f: &mut fmt::Formatter<'_>, lines: &mut std::str::Lines<'_>) -> fmt::Result {
     // --> source
     if let Some(line) = lines.next() {
         f.write_str("\n")?;
@@ -292,7 +315,7 @@ fn fmt_source_location(f: &mut fmt::Formatter, lines: &mut std::str::Lines) -> f
 
 /// Colors a single Solidity framed source location line. Part of [`fmt_source_location`].
 fn fmt_framed_location(
-    f: &mut fmt::Formatter,
+    f: &mut fmt::Formatter<'_>,
     line: &str,
     highlight: Option<(Range<usize>, Style)>,
 ) -> fmt::Result {
@@ -334,6 +357,7 @@ mod tests {
 
     #[test]
     fn fmt_unicode() {
+        let msg = "Invalid character in string. If you are trying to use Unicode characters, use a unicode\"...\" string literal.";
         let e = Error {
             source_location: Some(SourceLocation { file: "test/Counter.t.sol".into(), start: 418, end: 462 }),
             secondary_source_locations: vec![],
@@ -341,11 +365,59 @@ mod tests {
             component: "general".into(),
             severity: Severity::Error,
             error_code: Some(8936),
-            message: "Invalid character in string. If you are trying to use Unicode characters, use a unicode\"...\" string literal.".into(),
+            message: msg.into(),
             formatted_message: Some("ParserError: Invalid character in string. If you are trying to use Unicode characters, use a unicode\"...\" string literal.\n  --> test/Counter.t.sol:17:21:\n   |\n17 |         console.log(\"1. ownership set correctly as governance: ✓\");\n   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n".into()),
         };
         let s = e.to_string();
         eprintln!("{s}");
-        assert!(!s.is_empty());
+        assert!(s.contains(msg), "\n{s}");
+    }
+
+    #[test]
+    fn only_formatted() {
+        let e = Error {
+            source_location: Some(SourceLocation { file: "test/Counter.t.sol".into(), start: 418, end: 462 }),
+            secondary_source_locations: vec![],
+            r#type: "ParserError".into(),
+            component: "general".into(),
+            severity: Severity::Error,
+            error_code: Some(8936),
+            message: String::new(),
+            formatted_message: Some("ParserError: Invalid character in string. If you are trying to use Unicode characters, use a unicode\"...\" string literal.\n  --> test/Counter.t.sol:17:21:\n   |\n17 |         console.log(\"1. ownership set correctly as governance: ✓\");\n   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n".into()),
+        };
+        let s = e.to_string();
+        eprintln!("{s}");
+        assert!(s.contains("Invalid character in string"), "\n{s}");
+    }
+
+    #[test]
+    fn solc_0_7() {
+        let output = r#"{"errors":[{"component":"general","errorCode":"6594","formattedMessage":"test/Counter.t.sol:7:1: TypeError: Contract \"CounterTest\" does not use ABI coder v2 but wants to inherit from a contract which uses types that require it. Use \"pragma abicoder v2;\" for the inheriting contract as well to enable the feature.\ncontract CounterTest is Test {\n^ (Relevant source part starts here and spans across multiple lines).\nlib/forge-std/src/StdInvariant.sol:72:5: Type only supported by ABIEncoderV2\n    function excludeArtifacts() public view returns (string[] memory excludedArtifacts_) {\n    ^ (Relevant source part starts here and spans across multiple lines).\nlib/forge-std/src/StdInvariant.sol:84:5: Type only supported by ABIEncoderV2\n    function targetArtifacts() public view returns (string[] memory targetedArtifacts_) {\n    ^ (Relevant source part starts here and spans across multiple lines).\nlib/forge-std/src/StdInvariant.sol:88:5: Type only supported by ABIEncoderV2\n    function targetArtifactSelectors() public view returns (FuzzSelector[] memory targetedArtifactSelectors_) {\n    ^ (Relevant source part starts here and spans across multiple lines).\nlib/forge-std/src/StdInvariant.sol:96:5: Type only supported by ABIEncoderV2\n    function targetSelectors() public view returns (FuzzSelector[] memory targetedSelectors_) {\n    ^ (Relevant source part starts here and spans across multiple lines).\nlib/forge-std/src/StdInvariant.sol:104:5: Type only supported by ABIEncoderV2\n    function targetInterfaces() public view returns (FuzzInterface[] memory targetedInterfaces_) {\n    ^ (Relevant source part starts here and spans across multiple lines).\n","message":"Contract \"CounterTest\" does not use ABI coder v2 but wants to inherit from a contract which uses types that require it. Use \"pragma abicoder v2;\" for the inheriting contract as well to enable the feature.","secondarySourceLocations":[{"end":2298,"file":"lib/forge-std/src/StdInvariant.sol","message":"Type only supported by ABIEncoderV2","start":2157},{"end":2732,"file":"lib/forge-std/src/StdInvariant.sol","message":"Type only supported by ABIEncoderV2","start":2592},{"end":2916,"file":"lib/forge-std/src/StdInvariant.sol","message":"Type only supported by ABIEncoderV2","start":2738},{"end":3215,"file":"lib/forge-std/src/StdInvariant.sol","message":"Type only supported by ABIEncoderV2","start":3069},{"end":3511,"file":"lib/forge-std/src/StdInvariant.sol","message":"Type only supported by ABIEncoderV2","start":3360}],"severity":"error","sourceLocation":{"end":558,"file":"test/Counter.t.sol","start":157},"type":"TypeError"}],"sources":{}}"#;
+        let crate::CompilerOutput { errors, .. } = serde_json::from_str(output).unwrap();
+        assert_eq!(errors.len(), 1);
+        let s = errors[0].to_string();
+        eprintln!("{s}");
+        assert!(s.contains("test/Counter.t.sol:7:1"), "\n{s}");
+        assert!(s.contains("ABI coder v2"), "\n{s}");
+    }
+
+    #[test]
+    fn solc_not_formatting_the_message1() {
+        let error = r#"{"component":"general","errorCode":"6553","formattedMessage":"SyntaxError: The msize instruction cannot be used when the Yul optimizer is activated because it can change its semantics. Either disable the Yul optimizer or do not use the instruction.\n\n","message":"The msize instruction cannot be used when the Yul optimizer is activated because it can change its semantics. Either disable the Yul optimizer or do not use the instruction.","severity":"error","sourceLocation":{"end":173,"file":"","start":114},"type":"SyntaxError"}"#;
+        let error = serde_json::from_str::<Error>(error).unwrap();
+        let s = error.to_string();
+        eprintln!("{s}");
+        assert!(s.contains("Error (6553)"), "\n{s}");
+        assert!(s.contains("The msize instruction cannot be used"), "\n{s}");
+    }
+
+    #[test]
+    fn solc_not_formatting_the_message2() {
+        let error = r#"{"component":"general","errorCode":"5667","formattedMessage":"Warning: Unused function parameter. Remove or comment out the variable name to silence this warning.\n\n","message":"Unused function parameter. Remove or comment out the variable name to silence this warning.","severity":"warning","sourceLocation":{"end":104,"file":"","start":95},"type":"Warning"}"#;
+        let error = serde_json::from_str::<Error>(error).unwrap();
+        let s = error.to_string();
+        eprintln!("{s}");
+        assert!(s.contains("Warning (5667)"), "\n{s}");
+        assert!(s.contains("Unused function parameter. Remove or comment out the variable name to silence this warning."), "\n{s}");
     }
 }

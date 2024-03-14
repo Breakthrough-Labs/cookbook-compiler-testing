@@ -1,3 +1,5 @@
+name: sanity
+
 on:
   workflow_dispatch: {}
   # Once per day at 00:00 UTC
@@ -7,16 +9,14 @@ on:
 env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
-  GETH_BUILD: 1.13.4-3f907d6a
 
-name: sanity
 jobs:
   unused-deps:
     runs-on: ubuntu-latest
     name: unused dependencies
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@nightly
 
