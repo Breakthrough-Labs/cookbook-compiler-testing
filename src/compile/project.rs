@@ -115,8 +115,6 @@ use crate::{
     Sources,
 };
 use rayon::prelude::*;
-use serde_json::to_string_pretty;
-use std::fs;
 use std::{collections::btree_map::BTreeMap, path::PathBuf, time::Instant};
 
 #[derive(Debug)]
@@ -133,16 +131,7 @@ pub struct ProjectCompiler<'a, T: ArtifactOutput> {
 impl<'a, T: ArtifactOutput> ProjectCompiler<'a, T> {
     /// Create a new `ProjectCompiler` to bootstrap the compilation process of the project's
     /// sources.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use foundry_compilers::Project;
-    ///
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile().unwrap();
-    /// ```
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn new(project: &'a Project<T>) -> Result<Self> {
         Self::with_sources(project, project.paths.read_input_files()?)
     }
@@ -153,7 +142,7 @@ impl<'a, T: ArtifactOutput> ProjectCompiler<'a, T> {
     ///
     /// Multiple (`Solc` -> `Sources`) pairs can be compiled in parallel if the `Project` allows
     /// multiple `jobs`, see [`crate::Project::set_solc_jobs()`].
-    #[cfg(all(feature = "svm-solc", not(target_arch = "wasm32")))]
+    #[cfg(feature = "svm-solc")]
     pub fn with_sources(project: &'a Project<T>, sources: Sources) -> Result<Self> {
         let graph = Graph::resolve_sources(&project.paths, sources)?;
         let (versions, edges) = graph.into_sources_by_version(project.offline)?;
@@ -207,13 +196,14 @@ impl<'a, T: ArtifactOutput> ProjectCompiler<'a, T> {
     /// The output of the compile process can be a mix of reused artifacts and freshly compiled
     /// `Contract`s
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
     /// use foundry_compilers::Project;
     ///
-    /// let project = Project::builder().build().unwrap();
-    /// let output = project.compile().unwrap();
+    /// let project = Project::builder().build()?;
+    /// let output = project.compile()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compile(self) -> Result<ProjectCompileOutput<T>> {
         let slash_paths = self.project.slash_paths;
@@ -314,8 +304,11 @@ impl<'a, T: ArtifactOutput> CompiledState<'a, T> {
                 ctx,
                 &project.paths,
             )
-        } else if output.has_error(&project.ignored_error_codes, &project.compiler_severity_filter)
-        {
+        } else if output.has_error(
+            &project.ignored_error_codes,
+            &project.ignored_file_paths,
+            &project.compiler_severity_filter,
+        ) {
             trace!("skip writing cache file due to solc errors: {:?}", output.errors);
             project.artifacts_handler().output_to_artifacts(
                 &output.contracts,
@@ -363,17 +356,23 @@ impl<'a, T: ArtifactOutput> ArtifactsState<'a, T> {
         let ArtifactsState { output, cache, compiled_artifacts } = self;
         let project = cache.project();
         let ignored_error_codes = project.ignored_error_codes.clone();
+        let ignored_file_paths = project.ignored_file_paths.clone();
         let compiler_severity_filter = project.compiler_severity_filter;
-        let has_error = output.has_error(&ignored_error_codes, &compiler_severity_filter);
+        let has_error =
+            output.has_error(&ignored_error_codes, &ignored_file_paths, &compiler_severity_filter);
         let skip_write_to_disk = project.no_artifacts || has_error;
         trace!(has_error, project.no_artifacts, skip_write_to_disk, cache_path=?project.cache_path(),"prepare writing cache file");
 
         let cached_artifacts = cache.consume(&compiled_artifacts, !skip_write_to_disk)?;
+
+        project.artifacts_handler().handle_cached_artifacts(&cached_artifacts)?;
+
         Ok(ProjectCompileOutput {
             compiler_output: output,
             compiled_artifacts,
             cached_artifacts,
             ignored_error_codes,
+            ignored_file_paths,
             compiler_severity_filter,
         })
     }
@@ -416,11 +415,15 @@ impl CompilerSources {
             };
         }
     }
+
     /// Filters out all sources that don't need to be compiled, see [`ArtifactsCache::filter`]
-    fn filtered<T: ArtifactOutput>(self, cache: &mut ArtifactsCache<T>) -> FilteredCompilerSources {
+    fn filtered<T: ArtifactOutput>(
+        self,
+        cache: &mut ArtifactsCache<'_, T>,
+    ) -> FilteredCompilerSources {
         fn filtered_sources<T: ArtifactOutput>(
             sources: VersionedSources,
-            cache: &mut ArtifactsCache<T>,
+            cache: &mut ArtifactsCache<'_, T>,
         ) -> VersionedFilteredSources {
             // fill all content hashes first so they're available for all source sets
             sources.iter().for_each(|(_, (_, sources))| {
@@ -431,13 +434,13 @@ impl CompilerSources {
                 .into_iter()
                 .map(|(solc, (version, sources))| {
                     trace!("Filtering {} sources for {}", sources.len(), version);
-                    let sources = cache.filter(sources, &version);
+                    let sources_to_compile = cache.filter(sources, &version);
                     trace!(
-                        "Detected {} dirty sources {:?}",
-                        sources.dirty().count(),
-                        sources.dirty_files().collect::<Vec<_>>()
+                        "Detected {} sources to compile {:?}",
+                        sources_to_compile.dirty().count(),
+                        sources_to_compile.dirty_files().collect::<Vec<_>>()
                     );
-                    (solc, (version, sources))
+                    (solc, (version, sources_to_compile))
                 })
                 .collect()
         }
@@ -483,6 +486,7 @@ impl FilteredCompilerSources {
     }
 
     #[cfg(test)]
+    #[cfg(all(feature = "project-util", feature = "svm-solc"))]
     fn sources(&self) -> &VersionedFilteredSources {
         match self {
             FilteredCompilerSources::Sequential(v) => v,
@@ -593,12 +597,15 @@ fn compile_parallel(
     let mut jobs = Vec::with_capacity(input.len());
     for (solc, (version, filtered_sources)) in input {
         if filtered_sources.is_empty() {
+            // nothing to compile
             trace!("skip solc {} {} for empty sources set", solc.as_ref().display(), version);
             continue;
         }
 
         let dirty_files: Vec<PathBuf> = filtered_sources.dirty_files().cloned().collect();
 
+        // depending on the composition of the filtered sources, the output selection can be
+        // optimized
         let mut opt_settings = settings.clone();
         let sources = sparse_output.sparse_sources(filtered_sources, &mut opt_settings, graph);
 
@@ -610,6 +617,8 @@ fn compile_parallel(
                 .cloned()
                 .collect::<Vec<_>>();
             if actually_dirty.is_empty() {
+                // nothing to compile for this particular language, all dirty files are in the other
+                // language set
                 trace!(
                     "skip solc {} {} compilation of {} compiler input due to empty source set",
                     solc.as_ref().display(),
@@ -625,17 +634,25 @@ fn compile_parallel(
                 .with_remappings(paths.remappings.clone())
                 .with_base_path(&paths.root)
                 .sanitized(&version);
+
             jobs.push((solc.clone(), version.clone(), job, actually_dirty))
         }
     }
 
+    // need to get the currently installed reporter before installing the pool, otherwise each new
+    // thread in the pool will get initialized with the default value of the `thread_local!`'s
+    // localkey. This way we keep access to the reporter in the rayon pool
     let scoped_report = report::get_default(|reporter| reporter.clone());
+
+    // start a rayon threadpool that will execute all `Solc::compile()` processes
     let pool = rayon::ThreadPoolBuilder::new().num_threads(num_jobs).build().unwrap();
 
     let outputs = pool.install(move || {
         jobs.into_par_iter()
             .map(move |(solc, version, input, actually_dirty)| {
+                // set the reporter on this thread
                 let _guard = report::set_scoped(&scoped_report);
+
                 trace!(
                     "calling solc `{}` {:?} with {} sources: {:?}",
                     version,
@@ -646,26 +663,25 @@ fn compile_parallel(
                 let start = Instant::now();
                 report::solc_spawn(&solc, &version, &input, &actually_dirty);
                 solc.compile(&input).map(move |output| {
-                    report::solc_success(&solc, &version, &output, &start.elapsed());
-
-                    // Serialize input and output to JSON
                     let input_name = format!("{}_input.json", version);
                     let output_name = format!("{}_output.json", version);
                     let _hi = utils::write_json_file(&input, &input_name, 64 * 1024);
                     let __hi = utils::write_json_file(&output, &output_name, 64 * 1024);
 
-                    (version.clone(), input, output)
+                    report::solc_success(&solc, &version, &output, &start.elapsed());
+                    (version, input, output)
                 })
             })
             .collect::<Result<Vec<_>>>()
     })?;
 
     let mut aggregated = AggregatedCompilerOutput::default();
-    for (version, _, output) in outputs {
-        // if create_build_info {
-        //     let build_info = RawBuildInfo::new(&input, &output, &version)?; // Note: This needs adjustment as `input` is not directly available here
-        //     aggregated.build_infos.insert(version, build_info);
-        // }
+    for (version, input, output) in outputs {
+        // if configured also create the build info
+        if create_build_info {
+            let build_info = RawBuildInfo::new(&input, &output, &version)?;
+            aggregated.build_infos.insert(version.clone(), build_info);
+        }
         aggregated.extend(version, output);
     }
 
@@ -676,9 +692,10 @@ fn compile_parallel(
 #[cfg(all(feature = "project-util", feature = "svm-solc"))]
 mod tests {
     use super::*;
-    use crate::{project_util::TempProject, MinimalCombinedArtifacts};
-
-    use std::path::PathBuf;
+    use crate::{
+        artifacts::output_selection::ContractOutputSelection, project_util::TempProject,
+        ConfigurableArtifacts, MinimalCombinedArtifacts,
+    };
 
     fn init_tracing() {
         let _ = tracing_subscriber::fmt()
@@ -697,9 +714,7 @@ mod tests {
         let prep = compiler.preprocess().unwrap();
         let cache = prep.cache.as_cached().unwrap();
         // 3 contracts
-        assert_eq!(cache.dirty_source_files.len(), 3);
-        assert!(cache.filtered.is_empty());
-        assert!(cache.cache.is_empty());
+        assert_eq!(cache.dirty_sources.len(), 3);
 
         let compiled = prep.compile().unwrap();
         assert_eq!(compiled.output.contracts.files().count(), 3);
@@ -717,7 +732,7 @@ mod tests {
         let inner = project.project();
         let compiler = ProjectCompiler::new(inner).unwrap();
         let prep = compiler.preprocess().unwrap();
-        assert!(prep.cache.as_cached().unwrap().dirty_source_files.is_empty())
+        assert!(prep.cache.as_cached().unwrap().dirty_sources.is_empty())
     }
 
     #[test]
@@ -778,6 +793,13 @@ mod tests {
         let state = compiler.preprocess().unwrap();
         let sources = state.sources.sources();
 
+        let cache = state.cache.as_cached().unwrap();
+
+        // 2 clean sources
+        assert_eq!(cache.cache.artifacts_len(), 2);
+        assert!(cache.cache.all_artifacts_exist());
+        assert_eq!(cache.dirty_sources.len(), 1);
+
         // single solc
         assert_eq!(sources.len(), 1);
 
@@ -820,6 +842,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn can_compile_real_project() {
         init_tracing();
         let paths = ProjectPathsConfig::builder()
@@ -829,5 +852,26 @@ mod tests {
         let project = Project::builder().paths(paths).build().unwrap();
         let compiler = ProjectCompiler::new(&project).unwrap();
         let _out = compiler.compile().unwrap();
+    }
+
+    #[test]
+    fn extra_output_cached() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-data/dapp-sample");
+        let paths = ProjectPathsConfig::builder().sources(root.join("src")).lib(root.join("lib"));
+        let mut project = TempProject::<ConfigurableArtifacts>::new(paths.clone()).unwrap();
+
+        // Compile once without enabled extra output
+        project.compile().unwrap();
+
+        // Enable extra output of abi
+        project.project_mut().artifacts =
+            ConfigurableArtifacts::new([], [ContractOutputSelection::Abi]);
+
+        // Ensure that abi appears after compilation and that we didn't recompile anything
+        let abi_path = project.project().paths.artifacts.join("Dapp.sol/Dapp.abi.json");
+        assert!(!abi_path.exists());
+        let output = project.compile().unwrap();
+        assert!(output.compiler_output.is_empty());
+        assert!(abi_path.exists());
     }
 }
